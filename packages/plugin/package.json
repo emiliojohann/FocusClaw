@@ -1,0 +1,30 @@
+{
+  "name": "@emiliojohann/focusclaw-openclaw",
+  "version": "2026.6.12",
+  "type": "module",
+  "description": "OpenClaw plugin for FocusClaw task management",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "openclaw": {
+    "extensions": ["./src/index.ts"],
+    "compat": {
+      "pluginApi": ">=2026.4.26",
+      "minGatewayVersion": "2026.4.26"
+    },
+    "build": {
+      "openclawVersion": "2026.4.26",
+      "pluginSdkVersion": "2026.4.26"
+    }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.29"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3"
+  }
+}

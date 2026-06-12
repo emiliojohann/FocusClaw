@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FocusClaw · Open Source AI Agent-Native Task Management 🤖</title>
+    <meta name="description" content="FocusClaw gives humans and AI agents persistent task context through a local-first app and API. Owners, due dates, tags, and comments stay organized in one place." />
+    <link rel="icon" type="image/png" href="/fc-logo.png" />
+    <link rel="preload" as="image" href="/fc-logo.png" />
+    <script>
+      (() => {
+        const key = 'focusclaw.theme.preference'
+        let preference = 'dark'
+        try {
+          const stored = window.localStorage.getItem(key)
+          if (stored === 'system' || stored === 'dark' || stored === 'light') preference = stored
+        } catch {}
+        const systemTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        document.documentElement.dataset.themePreference = preference
+        document.documentElement.dataset.theme = preference === 'system' ? systemTheme : preference
+      })()
+    </script>
+    <link rel="stylesheet" href="/src/index.css" />
+    <style>
+      html, body, #root {
+        background: var(--bg-primary);
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

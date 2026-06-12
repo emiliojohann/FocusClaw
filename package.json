@@ -1,0 +1,20 @@
+{
+  "name": "focusclaw",
+  "version": "2026.6.12",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "verify": "npm run build --workspaces --if-present && npm audit"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

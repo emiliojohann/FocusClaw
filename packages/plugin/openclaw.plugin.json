@@ -1,0 +1,29 @@
+{
+  "id": "focusclaw",
+  "name": "FocusClaw",
+  "description": "Agent-native task management. Create, read, update, and complete tasks in FocusClaw directly from OpenClaw.",
+  "version": "2026.6.12",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiUrl": {
+        "type": "string",
+        "description": "FocusClaw API URL. Defaults to http://localhost:3001",
+        "default": "http://localhost:3001"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "FocusClaw API key for authentication"
+      },
+      "workspaceSlug": {
+        "type": "string",
+        "description": "Default workspace slug to operate on"
+      },
+      "defaultProjectId": {
+        "type": "string",
+        "description": "Default project ID for task operations"
+      }
+    }
+  }
+}
