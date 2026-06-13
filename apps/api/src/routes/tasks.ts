@@ -10,6 +10,35 @@ function isValidUUID(s: string): boolean {
   return UUID_REGEX.test(s)
 }
 
+function localDateKey(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function parseDueDateInput(input: string): Date {
+  const dateOnlyMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch
+    return new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999)
+  }
+  return new Date(input)
+}
+
+function taskDueDateKey(dueDate: Date | string | null): string | null {
+  if (!dueDate) return null
+  const date = dueDate instanceof Date ? dueDate : new Date(dueDate)
+  if (Number.isNaN(date.getTime())) return null
+
+  // Older date-picker tasks were saved from YYYY-MM-DD as UTC midnight.
+  // Preserve the intended calendar day for those records.
+  const isUtcMidnight =
+    date.getUTCHours() === 0 &&
+    date.getUTCMinutes() === 0 &&
+    date.getUTCSeconds() === 0 &&
+    date.getUTCMilliseconds() === 0
+
+  return isUtcMidnight ? date.toISOString().slice(0, 10) : localDateKey(date)
+}
+
 // ─────────────────────────────────────────────
 // Natural Language Date Parser
 // ─────────────────────────────────────────────
@@ -149,7 +178,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
 
     // Use NL-parsed date if no explicit dueDate provided
     const finalDueDate = dueDate
-      ? (dueDate ? new Date(dueDate) : undefined)
+      ? (dueDate ? parseDueDateInput(dueDate) : undefined)
       : (nlDueDate || undefined)
 
     const aiReasoning = [
@@ -247,11 +276,12 @@ export async function taskRoutes(fastify: FastifyInstance) {
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
+    const todayKey = localDateKey(today)
     const nextWeek = new Date(today)
     nextWeek.setDate(nextWeek.getDate() + 7)
+    const nextWeekKey = localDateKey(nextWeek)
     const shouldIncludeArchived = includeArchived === 'true'
+    const isVisibleForDateFilter = (task: typeof result[number]) => shouldIncludeArchived || !task.archived
 
     // Apply filters in JS (simpler than SQL date math)
     // NOTE: 'all' is the default — excludes archived tasks unless includeArchived=true.
@@ -259,11 +289,17 @@ export async function taskRoutes(fastify: FastifyInstance) {
     //       'noDate' returns active tasks without a due date unless includeArchived=true.
     //       'archived' explicitly returns only archived tasks (completed tasks).
     if (filter === 'dueToday') {
-      result = result.filter(t => (shouldIncludeArchived || !t.archived) && t.dueDate && new Date(t.dueDate) >= today && new Date(t.dueDate) < tomorrow)
+      result = result.filter(t => isVisibleForDateFilter(t) && taskDueDateKey(t.dueDate) === todayKey)
     } else if (filter === 'dueThisWeek') {
-      result = result.filter(t => (shouldIncludeArchived || !t.archived) && t.dueDate && new Date(t.dueDate) >= today && new Date(t.dueDate) < nextWeek)
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= todayKey && dueKey < nextWeekKey
+      })
     } else if (filter === 'pastDue') {
-      result = result.filter(t => (shouldIncludeArchived || !t.archived) && t.dueDate && new Date(t.dueDate) < today)
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey < todayKey
+      })
     } else if (filter === 'noDate') {
       result = result.filter(t => (shouldIncludeArchived || !t.archived) && !t.dueDate)
     } else if (filter === 'archived') {
@@ -317,7 +353,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       setObj.labels = JSON.stringify(updates.labels)
     }
     if (updates.dueDate !== undefined) {
-      setObj.dueDate = updates.dueDate ? new Date(updates.dueDate) : null
+      setObj.dueDate = updates.dueDate ? parseDueDateInput(updates.dueDate) : null
     }
     if (updates.assignee !== undefined) {
       setObj.assignee = updates.assignee?.trim() || null
