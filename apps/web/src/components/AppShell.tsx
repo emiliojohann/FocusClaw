@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
-import { CalendarDays, Check, Settings, Smartphone } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { CalendarDays, Check, Plus, Settings, Smartphone } from 'lucide-react'
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_URL } from '@/lib/version'
 
 type AppView = 'tasks' | 'calendar' | 'settings'
@@ -21,6 +21,7 @@ const navItems = [
 
 const UPDATE_PREVIEW_TAG = 'v9999.0.0-preview'
 const UPDATE_PREVIEW_STORAGE_KEY = 'focusclaw.previewUpdate'
+const NEW_TASK_EVENT = 'focusclaw:new-task'
 
 function normalizeVersionTag(tag: string): number[] {
   return tag.replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10)).filter(Number.isFinite)
@@ -47,6 +48,8 @@ export function AppShell({
   mainClassName = 'flex-1 min-w-0',
 }: AppShellProps) {
   const [latestReleaseTag, setLatestReleaseTag] = useState('')
+  const location = useLocation()
+  const navigate = useNavigate()
 
   useEffect(() => {
     const updateVisualViewportGap = () => {
@@ -124,12 +127,20 @@ export function AppShell({
     </a>
   ) : null
 
+  const openMobileNewTask = () => {
+    if (location.pathname === '/' || location.pathname === '/calendar') {
+      window.dispatchEvent(new Event(NEW_TASK_EVENT))
+      return
+    }
+    navigate('/?newTask=1')
+  }
+
   return (
     <div className="fc-app-shell min-h-screen bg-[var(--bg-primary)] lg:flex">
       {sidebarVisible ? (
         <aside className="hidden w-60 bg-[var(--bg-secondary)] border-r border-[var(--border)] lg:flex lg:flex-col">
           <Link to="/" className="fc-header-row px-6 border-b border-[var(--border)] flex items-center gap-2 text-white text-lg font-extrabold hover:bg-[var(--bg-elevated)]/40">
-            <img src="/fc-logo.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="w-7 h-7 rounded-lg flex-shrink-0" />
+            <img src="/fc-logo-app.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="w-7 h-7 rounded-lg flex-shrink-0" />
             <span>FocusClaw</span>
           </Link>
           {latestReleaseTag ? <div className="px-4 pt-4">{renderUpdateIndicator('w-full')}</div> : null}
@@ -176,10 +187,18 @@ export function AppShell({
       <header className="fc-mobile-topbar z-30 shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)]/95 px-3 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-2 backdrop-blur-xl lg:hidden">
         <div className="mx-auto flex h-11 w-full max-w-md items-center justify-between gap-3">
           <Link to="/" className="fc-mobile-brand mr-auto flex min-w-0 items-center gap-2 rounded-lg pr-2 text-sm font-extrabold text-white">
-            <img src="/fc-logo.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="h-7 w-7 flex-shrink-0 rounded-lg" />
+            <img src="/fc-logo-app.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="h-7 w-7 flex-shrink-0 rounded-lg" />
             <span className="truncate">FocusClaw</span>
           </Link>
           {latestReleaseTag ? <div className="shrink-0">{renderUpdateIndicator()}</div> : null}
+          <button
+            type="button"
+            onClick={openMobileNewTask}
+            className="btn btn-primary fc-mobile-new-task-button h-8 shrink-0 px-2 text-[11px] font-semibold"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Task
+          </button>
         </div>
       </header>
 
@@ -209,11 +228,11 @@ export function AppShell({
       </nav>
 
       <div className="fc-portrait-lock" role="status" aria-live="polite">
-        <img src="/fc-logo.png" alt="" aria-hidden="true" className="fc-portrait-lock-logo" />
+        <img src="/fc-logo-app.png" alt="" aria-hidden="true" className="fc-portrait-lock-logo" />
         <Smartphone className="fc-portrait-lock-icon" aria-hidden="true" />
         <div className="fc-portrait-lock-copy">
-          <p className="fc-portrait-lock-title">Rotate to portrait</p>
-          <p className="fc-portrait-lock-text">FocusClaw works best when<br />your phone is upright.</p>
+          <p className="fc-portrait-lock-title">Rotate or resize your window</p>
+          <p className="fc-portrait-lock-text">FocusClaw works best in<br />a taller layout.</p>
         </div>
       </div>
     </div>

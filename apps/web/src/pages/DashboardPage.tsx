@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { taskApi, tagApi } from '@/lib/api'
 import {
   Check, Plus, X,
@@ -19,6 +20,7 @@ import {
   PRIORITY_CONFIG,
   type AssigneeFilter,
 } from '@/lib/shared'
+import { resolveTaskProjectId } from '@/lib/taskForm'
 
 interface Task {
   id: string
@@ -77,6 +79,7 @@ interface DashboardCache {
 }
 
 const DASHBOARD_CACHE_KEY = 'focusclaw.dashboard.snapshot'
+const NEW_TASK_EVENT = 'focusclaw:new-task'
 
 function readDashboardCache(): DashboardCache | null {
   if (typeof window === 'undefined') return null
@@ -174,6 +177,8 @@ function AssigneeBadge({ assignee }: { assignee?: string }) {
 }
 
 export default function DashboardPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const taskViewDefaults = getTaskViewDefaults()
   const [tasks, setTasks] = useState<Task[]>(lastDashboardTasks)
   const [projects, setProjects] = useState<ProjectRecord[]>(lastDashboardProjects)
@@ -181,6 +186,7 @@ export default function DashboardPage() {
   const [activeProject, setActiveProject] = useState(lastDashboardProject)
   const [projectFilter, setProjectFilter] = useState(lastDashboardProjectFilter)
   const [loading, setLoading] = useState(!initialDashboardCache)
+  const [initialRefreshComplete, setInitialRefreshComplete] = useState(!initialDashboardCache)
   const [initialized, setInitialized] = useState(lastDashboardProjects.length > 0)
   const [initError, setInitError] = useState('')
 
@@ -225,6 +231,7 @@ export default function DashboardPage() {
   const [editTags, setEditTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [resetSpinning, setResetSpinning] = useState(false)
+  const lastDashboardLoadKey = useRef('')
 
   useEffect(() => {
     if (!showNewTaskForm) return
@@ -289,7 +296,15 @@ export default function DashboardPage() {
   }
 
   useEffect(() => { initWorkspace() }, [])
-  useEffect(() => { if (initialized && activeProject && projects.length > 0) loadTasks() }, [initialized, activeProject, projectFilter, sort, filter, projects])
+  useEffect(() => {
+    if (!initialized || !activeProject || projects.length === 0) return
+    const projectIds = projectFilter === 'all'
+      ? projects.map((project) => project.id)
+      : [projectFilter]
+    const loadKey = dashboardLoadKey(projectFilter, sort, filter, projectIds)
+    if (lastDashboardLoadKey.current === loadKey) return
+    void loadTasks()
+  }, [initialized, activeProject, projectFilter, sort, filter, projects])
   useEffect(() => { if (initialized && activeProject && projects.length > 0) loadProjectTags() }, [initialized, activeProject, projectFilter, selectedTask, projects])
   useEffect(() => { setVisibleTaskCount(TASK_VISIBLE_INCREMENT) }, [projectFilter, sort, filter, tagFilter, assigneeFilter])
 
@@ -306,6 +321,7 @@ export default function DashboardPage() {
         fetchTasksForProjectIds(initialProjectIds, sort, filter),
         tagApi.list(),
       ])
+      lastDashboardLoadKey.current = dashboardLoadKey(initialProjectFilter, sort, filter, initialProjectIds)
       initialTags.sort((a: TagRecord, b: TagRecord) => a.name.localeCompare(b.name))
 
       setProjects(context.projects)
@@ -332,6 +348,7 @@ export default function DashboardPage() {
       setInitError('Failed to connect to API. Make sure the server is running.')
     } finally {
       setLoading(false)
+      setInitialRefreshComplete(true)
     }
   }
 
@@ -361,6 +378,14 @@ export default function DashboardPage() {
       .sort((a: Task, b: Task) => compareTasks(a, b, sortValue))
   }
 
+  const dashboardLoadKey = (projectFilterValue: string, sortValue: TaskSort, filterValue: TaskFilter, projectIds: string[]) =>
+    JSON.stringify({
+      projectFilter: projectFilterValue,
+      sort: sortValue,
+      filter: filterValue,
+      projectIds: [...projectIds].sort(),
+    })
+
   const loadTasks = async (options?: { sortOverride?: TaskSort; filterOverride?: TaskFilter; projectFilterOverride?: string }) => {
     if (!activeProject) return
     try {
@@ -372,6 +397,7 @@ export default function DashboardPage() {
         ? projects.map((project) => project.id)
         : [projectFilterValue]
       if (projectIds.length === 0) return
+      lastDashboardLoadKey.current = dashboardLoadKey(projectFilterValue, sortValue, filterValue, projectIds)
 
       const nextTasks = await fetchTasksForProjectIds(projectIds, sortValue, filterValue)
       setCachedTasks(nextTasks)
@@ -402,7 +428,7 @@ export default function DashboardPage() {
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTitle.trim()) return
-    const targetProjectId = newProjectId || activeProject
+    const targetProjectId = resolveTaskProjectId(newProjectId, activeProject)
     if (!targetProjectId) return
     setCreating(true)
     try {
@@ -433,6 +459,22 @@ export default function DashboardPage() {
     setNewProjectId(defaultProjectId || projects[0]?.id || '')
     setShowNewTaskForm(true)
   }
+
+  useEffect(() => {
+    const handleNewTask = () => {
+      if (!initialized) return
+      openNewTaskForm()
+    }
+    window.addEventListener(NEW_TASK_EVENT, handleNewTask)
+    return () => window.removeEventListener(NEW_TASK_EVENT, handleNewTask)
+  }, [initialized, projectFilter, activeProject, projects])
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('newTask') !== '1') return
+    if (!initialized) return
+    openNewTaskForm()
+    navigate('/', { replace: true })
+  }, [location.search, initialized, projectFilter, activeProject, projects, navigate])
 
   const handleCompleteTask = async (taskId: string) => {
     try {
@@ -579,6 +621,7 @@ export default function DashboardPage() {
   const hiddenTaskCount = Math.max(filteredTasks.length - visibleTasks.length, 0)
   const displayedStats = getTaskOverviewStats(filteredTasks)
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
+  const showInitialEmptyRefresh = !initialRefreshComplete && filteredTasks.length === 0
 
   if (initError) {
     return (
@@ -654,7 +697,7 @@ export default function DashboardPage() {
               <button
                 onClick={openNewTaskForm}
                 disabled={!initialized}
-                className="btn btn-primary text-xs fc-control shrink-0 px-2 sm:px-4"
+                className="btn btn-primary text-xs fc-control shrink-0 px-2 sm:px-4 fc-desktop-only"
               >
                 <Plus className="w-3.5 h-3.5" />
                 New Task
@@ -744,13 +787,12 @@ export default function DashboardPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
-          {loading ? (
+          {loading || showInitialEmptyRefresh ? (
             <div className="flex items-center justify-center py-20">
               <div className="spinner" />
             </div>
           ) : filteredTasks.length === 0 ? (
             <div className="text-center py-20">
-              <img src="/fc-logo.png" alt="" aria-hidden="true" className="w-11 h-11 mx-auto mb-3 rounded-xl shadow-lg shadow-[rgba(245,61,45,0.2)]" />
               <p className="text-[var(--text-secondary)] font-medium">No matching tasks</p>
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 {tagFilter === 'all' && assigneeFilter === 'all'
@@ -759,7 +801,7 @@ export default function DashboardPage() {
               </p>
               <button
                 onClick={openNewTaskForm}
-                className="btn btn-primary text-xs mt-4"
+                className="btn btn-primary text-xs mt-4 fc-desktop-only"
               >
                 <Plus className="w-3.5 h-3.5" /> New Task
               </button>
@@ -1061,7 +1103,7 @@ export default function DashboardPage() {
                   })}
                 </div>
               </div>
-              <button type="submit" disabled={creating || !newTitle.trim() || !newProjectId} className="btn btn-primary w-full">
+              <button type="submit" disabled={creating || !newTitle.trim() || !resolveTaskProjectId(newProjectId, activeProject)} className="btn btn-primary w-full">
                 {creating ? 'Creating...' : 'Create Task'}
               </button>
             </form>

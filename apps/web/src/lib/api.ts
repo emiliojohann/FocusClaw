@@ -1,10 +1,26 @@
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+export const API_BASE = import.meta.env?.VITE_API_URL || '/api'
+const API_KEY_STORAGE_KEY = 'focusclaw.apiKey'
+
+function getSavedApiKey(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(API_KEY_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function authHeaders(): HeadersInit {
+  const key = getSavedApiKey()
+  return key ? { 'x-api-key': key } : {}
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const hasBody = options.body && options.body !== undefined
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
+      ...authHeaders(),
       ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
@@ -219,7 +235,7 @@ export const backupApi = {
   exportSnapshotEncrypted: async (fileName: string, passphrase: string) => {
     const response = await fetch(`${API_BASE}/backups/snapshots/${encodeURIComponent(fileName)}/export`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ passphrase }),
     })
 
@@ -249,9 +265,22 @@ export const backupApi = {
     `${API_BASE}/backups/download/${encodeURIComponent(fileName)}`,
 }
 
-// API Key management — no-op for single-user local mode
 export const apiKey = {
-  get: () => '',
-  set: (_key: string) => {},
-  clear: () => {},
+  get: () => getSavedApiKey(),
+  set: (key: string) => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(API_KEY_STORAGE_KEY, key)
+    } catch {
+      // API key persistence is best-effort for local-first browser use.
+    }
+  },
+  clear: () => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.removeItem(API_KEY_STORAGE_KEY)
+    } catch {
+      // API key persistence is best-effort for local-first browser use.
+    }
+  },
 }

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiKey } from '@/lib/api'
+import { API_BASE, apiKey } from '@/lib/api'
 
 export default function SetupPage() {
   const navigate = useNavigate()
-  const [key, setKey] = useState('')
+  const [key, setKey] = useState(apiKey.get())
   const [error, setError] = useState('')
   const [isHovering, setIsHovering] = useState(false)
 
@@ -50,8 +50,9 @@ export default function SetupPage() {
         <div className="glass-card rounded-2xl p-8 gradient-border">
           <h2 className="text-xl font-semibold text-white mb-2">Connect to your workspace</h2>
           <p className="text-gray-400 text-sm mb-6">
-            Enter your API key to securely connect. For local development, use <code className="text-purple-400 bg-purple-900/30 px-2 py-0.5 rounded">dev-api-key</code>
+            Save the API key only when your FocusClaw API was started with <code className="text-purple-400 bg-purple-900/30 px-2 py-0.5 rounded">API_KEY</code>. Local auth is disabled when that variable is unset.
           </p>
+          <p className="text-gray-500 text-xs mb-4">API base: <code className="text-gray-300">{API_BASE}</code></p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="relative">
@@ -88,6 +89,13 @@ export default function SetupPage() {
                 </svg>
               </span>
               <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-indigo-600 opacity-0 hover:opacity-100 transition-opacity" />
+            </button>
+            <button
+              type="button"
+              onClick={() => { apiKey.clear(); navigate('/') }}
+              className="w-full text-gray-400 hover:text-white text-sm transition-colors"
+            >
+              Continue without an API key
             </button>
           </form>
         </div>

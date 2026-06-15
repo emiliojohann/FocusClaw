@@ -86,18 +86,6 @@ const HOUR_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1)
 const MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
 const TAG_PREVIEW_LIMIT = 15
 const TAG_SOFT_WARNING_COUNT = 60
-const AGENT_STATUS_COMMANDS = [
-  { command: 'focusclaw help', description: 'Show available read-only commands' },
-  { command: 'focusclaw today', description: 'Open tasks due today' },
-  { command: 'focusclaw overdue', description: 'Overdue open tasks' },
-  { command: 'focusclaw week', description: 'Open tasks due this week' },
-  { command: 'focusclaw project Launch Plan', description: 'Open tasks for one project' },
-]
-const AGENT_ACTION_EXAMPLES = [
-  'Add a task to Launch Plan: prepare screenshots, due Friday.',
-  'Mark the onboarding checklist complete.',
-  'Delete the task about drafting the first content batch.',
-]
 
 function colorForTagName(name: string): typeof TAG_COLORS[0] {
   let hash = 0
@@ -116,6 +104,8 @@ export default function SettingsPage() {
   const [showAllTags, setShowAllTags] = useState(false)
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [editingTagName, setEditingTagName] = useState('')
+  const [newProjectName, setNewProjectName] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
   const [tagPendingDelete, setTagPendingDelete] = useState<SavedTag | null>(null)
   const [deletingTag, setDeletingTag] = useState(false)
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
@@ -299,6 +289,31 @@ export default function SettingsPage() {
     setEditingProjectName(project.name)
     setProjectMessage('')
     setProjectError('')
+  }
+
+  const createProject = async () => {
+    const normalized = newProjectName.trim()
+    if (!normalized || !activeWorkspaceId) return
+    setCreatingProject(true)
+    setProjectMessage('')
+    setProjectError('')
+    try {
+      const createdProject = await projectApi.create(activeWorkspaceId, normalized) as ProjectRecord
+      setProjects((prev) => {
+        const nextProjects = [...prev, createdProject]
+        lastSettingsProjects = nextProjects
+        writeSettingsCache({ projects: nextProjects, tags })
+        return nextProjects
+      })
+      setNewProjectName('')
+      releaseMobileKeyboard()
+      setProjectMessage('Project created')
+      window.setTimeout(() => setProjectMessage(''), 1500)
+    } catch (err: any) {
+      setProjectError(err?.message || 'Failed to create project')
+    } finally {
+      setCreatingProject(false)
+    }
   }
 
   const saveProjectRename = async () => {
@@ -735,62 +750,85 @@ export default function SettingsPage() {
                 <div className="h-[46px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]" />
                 <div className="h-[46px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]" />
               </div>
-            ) : sortedProjects.length === 0 ? (
-              <p className="text-xs text-zinc-500">No projects yet.</p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {sortedProjects.map((project) => {
-                  const isEditing = editingProjectId === project.id
-                  const isSaving = savingProjectId === project.id
-                  return (
-                    <div
-                      key={project.id}
-                      className={`min-h-[46px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-2 ${isEditing ? 'space-y-2' : 'flex items-center justify-between gap-2'}`}
-                    >
-                      {isEditing ? (
-                        <>
-                          <input
-                            type="text"
-                            autoFocus
-                            autoComplete="off"
-                            value={editingProjectName}
-                            onChange={(e) => setEditingProjectName(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') saveProjectRename()
-                              if (e.key === 'Escape') { setEditingProjectId(null); releaseMobileKeyboard() }
-                            }}
-                            className="input text-xs !py-1.5 w-full"
-                          />
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={saveProjectRename}
-                              disabled={isSaving || !editingProjectName.trim()}
-                              className="btn btn-primary text-xs"
-                            >
-                              {isSaving ? 'Saving...' : 'Save'}
-                            </button>
-                            <button onClick={() => { setEditingProjectId(null); releaseMobileKeyboard() }} className="btn btn-ghost p-1.5" aria-label="Cancel project rename">
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <span className="min-w-0 truncate text-xs font-medium text-zinc-200">{project.name}</span>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <button onClick={() => startProjectRename(project)} className="btn btn-ghost p-1.5" title="Rename project">
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => requestProjectDelete(project)} className="btn btn-ghost p-1.5 text-red-400 hover:bg-red-500/10" title="Delete project">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+              <>
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') createProject() }}
+                    placeholder="New project name"
+                    className="input text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={createProject}
+                    disabled={creatingProject || !newProjectName.trim() || !activeWorkspaceId}
+                    className="btn btn-primary w-full text-xs whitespace-nowrap sm:w-auto sm:shrink-0 sm:self-start"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {creatingProject ? 'Adding...' : 'Add Project'}
+                  </button>
+                </div>
+                {sortedProjects.length === 0 ? (
+                  <p className="text-xs text-zinc-500">No projects yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {sortedProjects.map((project) => {
+                      const isEditing = editingProjectId === project.id
+                      const isSaving = savingProjectId === project.id
+                      return (
+                        <div
+                          key={project.id}
+                          className={`min-h-[46px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-2 ${isEditing ? 'space-y-2' : 'flex items-center justify-between gap-2'}`}
+                        >
+                          {isEditing ? (
+                            <>
+                              <input
+                                type="text"
+                                autoFocus
+                                autoComplete="off"
+                                value={editingProjectName}
+                                onChange={(e) => setEditingProjectName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') saveProjectRename()
+                                  if (e.key === 'Escape') { setEditingProjectId(null); releaseMobileKeyboard() }
+                                }}
+                                className="input text-xs !py-1.5 w-full"
+                              />
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={saveProjectRename}
+                                  disabled={isSaving || !editingProjectName.trim()}
+                                  className="btn btn-primary text-xs"
+                                >
+                                  {isSaving ? 'Saving...' : 'Save'}
+                                </button>
+                                <button onClick={() => { setEditingProjectId(null); releaseMobileKeyboard() }} className="btn btn-ghost p-1.5" aria-label="Cancel project rename">
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <span className="min-w-0 truncate text-xs font-medium text-zinc-200">{project.name}</span>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <button onClick={() => startProjectRename(project)} className="btn btn-ghost p-1.5" title="Rename project">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => requestProjectDelete(project)} className="btn btn-ghost p-1.5 text-red-400 hover:bg-red-500/10" title="Delete project">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </section>
 
@@ -828,7 +866,7 @@ export default function SettingsPage() {
                     className="input text-xs flex-1"
                     placeholder="new tag name"
                   />
-                  <button disabled={savingTag || !newTagName.trim()} onClick={createTag} className="btn btn-primary text-xs">
+                  <button disabled={savingTag || !newTagName.trim()} onClick={createTag} className="btn btn-primary w-full text-xs whitespace-nowrap sm:w-auto sm:shrink-0 sm:self-start">
                     <Plus className="w-3.5 h-3.5" /> Add Tag
                   </button>
                 </div>
@@ -1112,68 +1150,37 @@ export default function SettingsPage() {
 
           <section className="card p-5">
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-sm font-semibold text-white">Agent & Integration Usage</h3>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Plain text</span>
+              <h3 className="text-sm font-semibold text-white">Private Access</h3>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wider">URLs</span>
             </div>
             <p className="text-xs text-zinc-500 mb-4">
-              Read-only plain-text triggers are compact status checks for any connected agent or messaging integration. Add, edit, complete, and delete tasks through an agent in natural language.
+              Use these app URLs to open this FocusClaw instance locally or from another device on your private Tailscale network.
             </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
-              {AGENT_STATUS_COMMANDS.map((item) => (
-                <div key={item.command} className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-3">
-                  <code className="block text-xs font-semibold text-zinc-200">{item.command}</code>
-                  <p className="mt-1 text-[11px] text-zinc-500">{item.description}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Agent action examples</p>
-              <div className="space-y-1.5">
-                {AGENT_ACTION_EXAMPLES.map((example) => (
-                  <p key={example} className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-zinc-300">
-                    {example}
-                  </p>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="card p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-white">Access URLs</h3>
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Runtime</span>
-            </div>
-            <p className="text-xs text-zinc-500 mb-4">These URLs are read from the running FocusClaw instance. Local access works only on this machine; private access appears only when configured.</p>
 
             <div className="space-y-2">
               <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-3">
                 <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Local App URL</p>
                 <div className="flex items-center gap-2">
                   <code className="text-xs text-zinc-300 break-all flex-1">{localAppUrl}</code>
-                  <button onClick={() => copyText('local', localAppUrl)} className="btn btn-ghost p-1.5" title="Copy local URL">
+                  <button onClick={() => copyText('local-app-url', localAppUrl)} className="btn btn-ghost p-1.5" title="Copy local app URL">
                     <Copy className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                {copiedKey === 'local' ? <p className="text-[11px] text-green-400 mt-1">Copied</p> : null}
+                {copiedKey === 'local-app-url' ? <p className="text-[11px] text-green-400 mt-1">Copied</p> : null}
               </div>
 
               <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-3">
                 <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Tailscale / Private App URL</p>
-                {privateAppUrl ? (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <code className="text-xs text-zinc-300 break-all flex-1">{privateAppUrl}</code>
-                      <button onClick={() => copyText('private', privateAppUrl)} className="btn btn-ghost p-1.5" title="Copy private URL">
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    {copiedKey === 'private' ? <p className="text-[11px] text-green-400 mt-1">Copied</p> : null}
-                  </>
-                ) : (
-                  <p className="text-xs text-zinc-500">Not configured. Start with <span className="font-mono">./start.sh --tailscale</span> or set <span className="font-mono">VITE_PRIVATE_APP_URL</span>.</p>
-                )}
+                <div className="flex items-center gap-2">
+                  <code className="text-xs text-zinc-300 break-all flex-1">{privateAppUrl || 'Not configured'}</code>
+                  {privateAppUrl ? (
+                    <button onClick={() => copyText('private-app-url', privateAppUrl)} className="btn btn-ghost p-1.5" title="Copy private app URL">
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-[11px] text-zinc-500">Set this with Tailscale mode or <span className="font-mono">VITE_PRIVATE_APP_URL</span>.</p>
+                {copiedKey === 'private-app-url' ? <p className="text-[11px] text-green-400 mt-1">Copied</p> : null}
               </div>
             </div>
           </section>

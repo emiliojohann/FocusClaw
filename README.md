@@ -26,10 +26,14 @@ FocusClaw is in early development. The self-hosted app is usable locally, and th
 - Frontend: React 19, Vite, Tailwind CSS
 - Backend: Fastify, SQLite, Drizzle ORM
 - Storage: local SQLite database at `data/focusclaw.db`
-- Agent access: REST API, OpenClaw plugin first, other agent platforms via HTTP
+- Agent access: local Agent Automation API, OpenClaw plugin first, other agent platforms via HTTP
 - Deployment: local-first self-hosting, optional private Tailscale access
 
 ## Quick Start
+
+Local development is the default path.
+
+Requires Node.js `^20.19.0` or `>=22.12.0`.
 
 ```bash
 git clone https://github.com/emiliojohann/FocusClaw.git
@@ -45,6 +49,8 @@ The default local URLs are:
 - API health check: `http://127.0.0.1:3001/health`
 
 `./start.sh` creates the local `data/` directory and points the API at `data/focusclaw.db`.
+
+FocusClaw includes a local Agent Automation API for trusted agents and scripts. It lets agents read projects, create tasks, update work, and mark tasks complete without controlling the browser UI. See [Agent Automation API](./docs/agent-automation-api.md) for the technical contract.
 
 ## Common Workflows
 
@@ -74,7 +80,7 @@ Agents should find tasks by title/project before asking users for task IDs.
 
 Create projects, add tasks, set priority, choose due dates, assign owner labels, and mark work complete from the web app.
 
-Agents can work with the same records through the REST API. This keeps human task planning and agent execution context in one structured place.
+Agents can work with the same records through the local Agent Automation API. This keeps human task planning and agent execution context in one structured place.
 
 ### Universal Tags
 
@@ -100,7 +106,7 @@ Use **Settings -> Local Snapshots & Encrypted Exports** to create local snapshot
 
 Local snapshots are stored at `~/.focusclaw/backups`. Encrypted exports require a passphrase of at least 6 characters. Restores and imports create a safety backup before replacing the current workspace data.
 
-## Private Tailscale Access
+## Advanced: Private Tailscale Access
 
 FocusClaw can run on one host machine and be accessed from another device in the same private Tailscale tailnet without exposing FocusClaw to the public internet.
 
@@ -176,11 +182,10 @@ Use a dedicated port per app if the same machine hosts multiple private tools.
 
 ### Settings Page URLs
 
-The Settings page shows runtime URLs for the FocusClaw instance you are currently viewing.
+The Settings page shows app access URLs for the FocusClaw instance you are currently viewing.
 
 - **Local App URL** is usually `http://127.0.0.1:5173`.
 - **Tailscale / Private App URL** is the Tailscale Serve URL, usually `https://<HOST_TAILSCALE_DNS_NAME>:8443/`.
-- **API** usually shows `/api`, which means browser API requests use the same origin as the web app.
 
 If you are viewing a separate development clone on another device, Settings describes that clone, not the host machine's database.
 
@@ -198,13 +203,26 @@ Useful environment variables:
 ```bash
 PORT=3001
 API_HOST=127.0.0.1
+API_KEY=dev-api-key
 VITE_DEV_HOST=127.0.0.1
 VITE_DEV_PORT=5173
 VITE_API_PROXY_TARGET=http://127.0.0.1:3001
 VITE_API_URL=/api
 VITE_PRIVATE_APP_URL=https://<HOST_TAILSCALE_DNS_NAME>:8443
+VITE_PRIVATE_API_URL=/api
 CORS_ORIGINS=https://<HOST_TAILSCALE_DNS_NAME>:8443,http://localhost:5173,http://127.0.0.1:5173
 ```
+
+If `CORS_ORIGINS` is unset, the API allows the local app origins and any configured `FOCUSCLAW_PUBLIC_URL` or `VITE_PRIVATE_APP_URL`. Set `CORS_ORIGINS` explicitly when a browser app calls the API from another origin.
+
+## Troubleshooting
+
+- **Port already in use:** change `PORT` for the API or `VITE_DEV_PORT` for the web app.
+- **API unreachable:** confirm `./start.sh` is still running, then open `http://127.0.0.1:3001/health`.
+- **401 errors:** if `API_KEY` is set on the API, agents and scripts must send the matching value as `x-api-key`. See [Agent Automation API](./docs/agent-automation-api.md).
+- **Linux Rollup optional dependency errors:** remove `node_modules` and run `npm install` again so platform-specific optional packages are installed.
+- **`npm ci` fails after dependency edits:** use `npm install` for local development, then commit the updated lockfile when changes are ready.
+- **Logs:** `./start.sh` runs the API and web app in the foreground, so startup, CORS, auth, and Vite errors print in that terminal.
 
 ## Repository Layout
 

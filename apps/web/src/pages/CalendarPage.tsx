@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react'
 import { taskApi } from '@/lib/api'
 import { AppShell } from '@/components/AppShell'
 import { TaskPanel } from '@/components/TaskPanel'
@@ -27,6 +27,7 @@ import {
   assigneeMatchesFilter,
   type AssigneeFilter,
 } from '@/lib/shared'
+import { resolveTaskProjectId } from '@/lib/taskForm'
 
 interface Task {
   id: string
@@ -63,6 +64,7 @@ interface CalendarCache {
 }
 
 const CALENDAR_CACHE_KEY = 'focusclaw.calendar.snapshot'
+const NEW_TASK_EVENT = 'focusclaw:new-task'
 
 function readCalendarCache(): CalendarCache | null {
   if (typeof window === 'undefined') return null
@@ -248,6 +250,7 @@ export default function CalendarPage() {
   const [moveError, setMoveError] = useState('')
   const [activeDragTaskId, setActiveDragTaskId] = useState('')
   const [agendaDay, setAgendaDay] = useState<number | null>(null)
+  const lastCalendarLoadKey = useRef('')
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
   const [showNewTaskForm, setShowNewTaskForm] = useState(false)
@@ -335,7 +338,15 @@ export default function CalendarPage() {
   }
 
   useEffect(() => { initWorkspace() }, [])
-  useEffect(() => { if (initialized && activeProject && projects.length > 0) loadTasks() }, [initialized, activeProject, projectFilter, showCompleted, projects])
+  useEffect(() => {
+    if (!initialized || !activeProject || projects.length === 0) return
+    const projectIds = projectFilter === 'all'
+      ? projects.map((project) => project.id)
+      : [projectFilter]
+    const loadKey = calendarLoadKey(projectFilter, showCompleted, projectIds)
+    if (lastCalendarLoadKey.current === loadKey) return
+    void loadTasks()
+  }, [initialized, activeProject, projectFilter, showCompleted, projects])
 
   const initWorkspace = async () => {
     try {
@@ -350,6 +361,7 @@ export default function CalendarPage() {
         ? context.projects.map((project) => project.id)
         : [initialProjectFilter]
       const { calendarTasks, overviewTasks } = await fetchCalendarTasks(initialProjectIds, showCompleted)
+      lastCalendarLoadKey.current = calendarLoadKey(initialProjectFilter, showCompleted, initialProjectIds)
 
       setProjects(context.projects)
       setActiveWorkspace(context.workspace.id)
@@ -392,7 +404,7 @@ export default function CalendarPage() {
   const handleCreateTask = async (e: FormEvent) => {
     e.preventDefault()
     if (!newTitle.trim()) return
-    const targetProjectId = newProjectId || activeProject
+    const targetProjectId = resolveTaskProjectId(newProjectId, activeProject)
     if (!targetProjectId) return
     setCreating(true)
     try {
@@ -442,6 +454,13 @@ export default function CalendarPage() {
     return { calendarTasks, overviewTasks }
   }
 
+  const calendarLoadKey = (projectFilterValue: string, includeCompleted: boolean, projectIds: string[]) =>
+    JSON.stringify({
+      projectFilter: projectFilterValue,
+      includeCompleted,
+      projectIds: [...projectIds].sort(),
+    })
+
   const loadTasks = async (options?: { showCompletedOverride?: boolean; projectFilterOverride?: string }) => {
     if (!activeProject || projects.length === 0) return
     try {
@@ -451,6 +470,7 @@ export default function CalendarPage() {
       const projectIds = projectFilterValue === 'all'
         ? projects.map((project) => project.id)
         : [projectFilterValue]
+      lastCalendarLoadKey.current = calendarLoadKey(projectFilterValue, includeCompleted, projectIds)
       const { calendarTasks, overviewTasks } = await fetchCalendarTasks(projectIds, includeCompleted)
       setCachedTasks(calendarTasks)
       setOverviewTasks(overviewTasks)
@@ -512,6 +532,15 @@ export default function CalendarPage() {
     setNewDueDate(formatDateInput(defaultDueDate))
     setShowNewTaskForm(true)
   }
+
+  useEffect(() => {
+    const handleNewTask = () => {
+      if (!initialized) return
+      openNewTaskForm()
+    }
+    window.addEventListener(NEW_TASK_EVENT, handleNewTask)
+    return () => window.removeEventListener(NEW_TASK_EVENT, handleNewTask)
+  }, [initialized, projectFilter, activeProject, projects, year, month])
 
   const getTasksForDay = (day: number): Task[] => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -698,6 +727,7 @@ export default function CalendarPage() {
       tasks: getTasksForDay(day).sort((a, b) => Number(a.archived) - Number(b.archived)),
     }
   }).filter(({ tasks }) => tasks.length > 0)
+  const showBlockingLoader = loading && visibleCalendarTasks.length > 0
 
   if (initError) {
     return (
@@ -755,7 +785,7 @@ export default function CalendarPage() {
               <button
                 onClick={openNewTaskForm}
                 disabled={!initialized}
-                className="btn btn-primary text-xs fc-control shrink-0 px-2 sm:px-4"
+                className="btn btn-primary text-xs fc-control shrink-0 px-2 sm:px-4 fc-desktop-only"
               >
                 <Plus className="w-3.5 h-3.5" />
                 New Task
@@ -821,7 +851,7 @@ export default function CalendarPage() {
         </header>
 
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
-          {loading ? (
+          {showBlockingLoader ? (
             <div className="flex items-center justify-center py-20"><div className="spinner" /></div>
           ) : (
             <>
@@ -1103,7 +1133,7 @@ export default function CalendarPage() {
                   })}
                 </div>
               </div>
-              <button type="submit" disabled={creating || !newTitle.trim() || !newProjectId} className="btn btn-primary w-full">
+              <button type="submit" disabled={creating || !newTitle.trim() || !resolveTaskProjectId(newProjectId, activeProject)} className="btn btn-primary w-full">
                 {creating ? 'Creating...' : 'Create Task'}
               </button>
             </form>

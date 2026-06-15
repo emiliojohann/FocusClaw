@@ -406,7 +406,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       .where(eq(activityLog.taskId, id))
       .orderBy(asc(activityLog.createdAt))
 
-    return reply.send(hydrateTasksWithTags(result))
+    return reply.send(result)
   })
 
   // GET /tasks/:id/comments — get comments for a task

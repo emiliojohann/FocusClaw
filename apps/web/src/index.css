@@ -130,6 +130,11 @@ body {
   transform: scale(0.98);
 }
 
+.fc-mobile-new-task-button,
+.fc-mobile-new-task-button:active {
+  transform: none !important;
+}
+
 .btn-secondary {
   background: var(--bg-elevated);
   color: var(--text-primary);
