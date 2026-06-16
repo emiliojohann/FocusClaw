@@ -50,7 +50,7 @@ The default local URLs are:
 
 `./start.sh` creates the local `data/` directory and points the API at `data/focusclaw.db`.
 
-FocusClaw includes a local Agent Automation API for trusted agents and scripts. It lets agents read projects, create tasks, update work, and mark tasks complete without controlling the browser UI. See [Agent Automation API](./docs/agent-automation-api.md) for the technical contract.
+FocusClaw includes a local Agent Automation API for trusted agents and scripts. It lets agents read projects, create tasks, update work, and mark tasks complete without controlling the browser UI. See [Agent Automation API](./docs/agent-automation-api.md) for the technical contract. For Hermes-specific setup guidance, see [Hermes Integration](./docs/hermes-integration.md).
 
 ## Common Workflows
 
@@ -231,6 +231,7 @@ apps/api       Fastify API server
 apps/web       React web app
 apps/landing   Landing page package
 packages/plugin OpenClaw plugin package
+docs/          Agent API and Hermes integration docs
 data/          Local SQLite database directory
 ```
 

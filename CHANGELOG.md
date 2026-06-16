@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.6.16 - 2026-06-16
+
+- Added a FocusClaw OpenClaw skill wrapper so agents can discover when and how to use FocusClaw.
+- Added Hermes integration guidance for using FocusClaw through the local REST API.
+- Linked the Hermes integration guide from the README.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.16` / `v2026.6.16`.
+
 ## v2026.6.15 - 2026-06-15
 
 - Thanked https://x.com/TomTurcotteTech and https://x.com/m_zokov for contributing feedback to this release.
@@ -11,7 +18,6 @@
 - Fixed mobile Calendar empty-state loader flicker when no dated tasks are available.
 - Added a mobile-only New Task button in the top bar across all pages.
 - Restored the new FocusClaw logo artwork with an optimized app asset and removed transient hard-refresh logo flicker from the Dashboard empty state.
-- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.15` / `v2026.6.15`.
 - Refined Settings button sizing and completed beta review cleanup.
 
 ## v2026.6.12 - 2026-06-13

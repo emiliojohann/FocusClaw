@@ -765,7 +765,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={createProject}
                     disabled={creatingProject || !newProjectName.trim() || !activeWorkspaceId}
-                    className="btn btn-primary w-full text-xs whitespace-nowrap sm:w-auto sm:shrink-0 sm:self-start"
+                    className="btn btn-primary text-xs sm:w-32"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     {creatingProject ? 'Adding...' : 'Add Project'}
@@ -866,7 +866,7 @@ export default function SettingsPage() {
                     className="input text-xs flex-1"
                     placeholder="new tag name"
                   />
-                  <button disabled={savingTag || !newTagName.trim()} onClick={createTag} className="btn btn-primary w-full text-xs whitespace-nowrap sm:w-auto sm:shrink-0 sm:self-start">
+                  <button disabled={savingTag || !newTagName.trim()} onClick={createTag} className="btn btn-primary text-xs">
                     <Plus className="w-3.5 h-3.5" /> Add Tag
                   </button>
                 </div>

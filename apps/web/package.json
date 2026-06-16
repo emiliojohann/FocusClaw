@@ -1,6 +1,6 @@
 {
   "name": "@focusclaw/web",
-  "version": "2026.6.15",
+  "version": "2026.6.16",
   "private": true,
   "type": "module",
   "scripts": {

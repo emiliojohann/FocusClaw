@@ -2,7 +2,7 @@
   "id": "focusclaw",
   "name": "FocusClaw",
   "description": "Agent-native task management. Create, read, update, and complete tasks in FocusClaw directly from OpenClaw.",
-  "version": "2026.6.15",
+  "version": "2026.6.16",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
