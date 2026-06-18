@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react'
 import { taskApi } from '@/lib/api'
 import { AppShell } from '@/components/AppShell'
+import { DatePicker } from '@/components/DatePicker'
 import { TaskPanel } from '@/components/TaskPanel'
 import {
   DndContext,
@@ -14,9 +15,9 @@ import {
 } from '@dnd-kit/core'
 import {
   CalendarDays, AlertCircle, RefreshCw,
-  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X
+  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X, ListTree
 } from 'lucide-react'
-import { getCalendarViewDefaults, getOverviewPanelVisible, setOverviewPanelVisible } from '@/lib/viewSettings'
+import { getCalendarViewDefaults, getCalendarViewState, getOverviewPanelVisible, setCalendarViewState, setOverviewPanelVisible } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
 import {
   ASSIGNEE_OPTIONS,
@@ -28,6 +29,7 @@ import {
   type AssigneeFilter,
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
+import { dueDateToLocalDateKey } from '@/lib/dates'
 
 interface Task {
   id: string
@@ -43,6 +45,8 @@ interface Task {
   parentId?: string
   recurring?: string
   labels?: string
+  subtaskTotal?: number
+  subtaskCompleted?: number
 }
 
 interface CommentEntry {
@@ -103,28 +107,45 @@ let lastCalendarWorkspace = initialCalendarCache?.workspaceId ?? ''
 let lastCalendarProject = initialCalendarCache?.activeProjectId ?? ''
 let lastCalendarProjectFilter = initialCalendarCache?.projectFilter ?? 'all'
 
-const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: string; bgColor: string }> = {
-  1: { label: 'Critical', badge: 'badge-critical', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)' },
-  2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)' },
-  3: { label: 'Medium', badge: 'badge-medium', color: '#eab308', bgColor: 'rgba(234,179,8,0.15)' },
-  4: { label: 'Low', badge: 'badge-low', color: '#71717a', bgColor: 'rgba(113,113,122,0.12)' },
+const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: string; bgColor: string; borderColor: string; shadowColor: string; activeTextColor: string }> = {
+  1: { label: 'Critical', badge: 'badge-critical', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)', shadowColor: 'rgba(239,68,68,0.15)', activeTextColor: '#ffffff' },
+  2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.3)', shadowColor: 'rgba(249,115,22,0.15)', activeTextColor: '#18181b' },
+  3: { label: 'Medium', badge: 'badge-medium', color: 'var(--priority-medium)', bgColor: 'var(--priority-medium-bg)', borderColor: 'var(--priority-medium-border)', shadowColor: 'var(--priority-medium-bg)', activeTextColor: 'var(--priority-medium-active-text)' },
+  4: { label: 'Low', badge: 'badge-low', color: '#71717a', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', shadowColor: 'rgba(113,113,122,0.14)', activeTextColor: '#ffffff' },
 }
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const MAX_VISIBLE_DAY_TASKS = 2
+const DESCRIPTION_MAX_LENGTH = 5000
 
 function AssigneeBadge({ assignee, compact = false }: { assignee?: string; compact?: boolean }) {
   const owner = getAssigneeOption(assignee)
   const Icon = owner.icon
   return (
     <span
-      className={`badge h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none ${compact ? 'max-w-[4.75rem] gap-1' : ''}`}
+      className={`badge h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none ${compact ? 'max-w-[4.75rem] gap-1' : 'gap-1'}`}
       style={{ background: `${owner.color}18`, color: owner.color, borderColor: `${owner.color}30` }}
       title={`Owner: ${owner.label}`}
     >
       <Icon className="w-2.5 h-2.5" />
       <span className="truncate">{owner.label}</span>
+    </span>
+  )
+}
+
+function SubtaskIndicator({ task, compact = false }: { task: Task; compact?: boolean }) {
+  const total = task.subtaskTotal || 0
+  if (total === 0) return null
+  const completed = task.subtaskCompleted || 0
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] font-medium text-zinc-400 ${compact ? 'h-4 px-1 text-[9px]' : 'h-5 px-1.5 text-[10px]'}`}
+      title={`${completed}/${total} subtasks complete`}
+      aria-label={`${completed} of ${total} subtasks complete`}
+    >
+      <ListTree className={compact ? 'h-2.5 w-2.5 text-zinc-500' : 'h-3 w-3 text-zinc-500'} />
+      {completed}/{total}
     </span>
   )
 }
@@ -143,10 +164,10 @@ function CalendarTaskChip({ task, onOpen }: { task: Task; onOpen: (task: Task) =
     opacity: isDragging ? 0.65 : 1,
     background: isCompleted ? 'rgba(113,113,122,0.14)' : priority.bgColor,
     color: isCompleted ? 'rgba(161,161,170,0.72)' : priority.color,
-    border: `1px solid ${isCompleted ? 'rgba(113,113,122,0.28)' : priority.color + '30'}`,
+    border: `1px solid ${isCompleted ? 'rgba(113,113,122,0.28)' : priority.borderColor}`,
     borderLeft: `3px solid ${isCompleted ? 'rgba(113,113,122,0.75)' : priority.color}`,
     textDecoration: isCompleted ? 'line-through' : 'none',
-    boxShadow: isDragging ? `0 10px 28px ${priority.color}26` : undefined,
+    boxShadow: isDragging ? `0 10px 28px ${priority.shadowColor}` : undefined,
     zIndex: isDragging ? 20 : undefined,
     transition: isDragging
       ? 'none'
@@ -166,7 +187,10 @@ function CalendarTaskChip({ task, onOpen }: { task: Task; onOpen: (task: Task) =
       style={style}
       title={task.title}
     >
-      <span className="block min-w-0 truncate text-[11px] leading-4">{task.title}</span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-[11px] leading-4">{task.title}</span>
+        <SubtaskIndicator task={task} compact />
+      </span>
     </button>
   )
 }
@@ -199,7 +223,7 @@ function CalendarDayCell({
   )
 }
 
-function CalendarAgendaTaskRow({ task, onOpen }: { task: Task; onOpen: (task: Task) => void }) {
+function CalendarAgendaTaskRow({ task, projectName, onOpen }: { task: Task; projectName: string; onOpen: (task: Task) => void }) {
   const priority = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG[4]
   const isCompleted = !!task.archived
 
@@ -210,7 +234,7 @@ function CalendarAgendaTaskRow({ task, onOpen }: { task: Task; onOpen: (task: Ta
       className="w-full rounded-xl border p-3 text-left transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
       style={{
         background: isCompleted ? 'rgba(113,113,122,0.10)' : priority.bgColor,
-        borderColor: isCompleted ? 'rgba(113,113,122,0.28)' : `${priority.color}30`,
+        borderColor: isCompleted ? 'rgba(113,113,122,0.28)' : priority.borderColor,
       }}
     >
       <span className="flex items-center gap-2 min-w-0">
@@ -222,30 +246,44 @@ function CalendarAgendaTaskRow({ task, onOpen }: { task: Task; onOpen: (task: Ta
           <span className={`block truncate text-sm font-medium ${isCompleted ? 'text-zinc-500 line-through' : 'text-white'}`}>
             {task.title}
           </span>
-          <span className="block truncate text-[11px] text-zinc-500">{isCompleted ? 'Completed' : priority.label}</span>
+          <span className="block truncate text-[11px] text-zinc-500">{projectName}</span>
         </span>
-        {!isCompleted && <span className={`badge ${priority.badge} shrink-0 text-[10px]`}>{priority.label}</span>}
-        {isCompleted && <span className="shrink-0 text-[10px] font-medium text-zinc-500">Done</span>}
-        <AssigneeBadge assignee={task.assignee} />
+        {!isCompleted && (
+          <span className={`badge ${priority.badge} h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none`}>
+            {priority.label}
+          </span>
+        )}
+        <SubtaskIndicator task={task} />
+        <AssigneeBadge assignee={task.assignee} compact />
       </span>
     </button>
   )
 }
 
+function compareAgendaTasks(a: Task, b: Task): number {
+  if (!!a.archived !== !!b.archived) return Number(a.archived) - Number(b.archived)
+  const priorityDiff = (a.priority || 4) - (b.priority || 4)
+  if (priorityDiff !== 0) return priorityDiff
+  const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0
+  const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0
+  return aCreated - bCreated
+}
+
 export default function CalendarPage() {
   const calendarDefaults = getCalendarViewDefaults()
+  const calendarViewState = getCalendarViewState()
   const [tasks, setTasks] = useState<Task[]>(lastCalendarTasks)
   const [overviewTasks, setOverviewTasks] = useState<Task[]>(lastCalendarOverviewTasks)
   const [projects, setProjects] = useState<ProjectRecord[]>(lastCalendarProjects)
   const [activeWorkspace, setActiveWorkspace] = useState(lastCalendarWorkspace)
   const [activeProject, setActiveProject] = useState(lastCalendarProject)
-  const [projectFilter, setProjectFilter] = useState(lastCalendarProjectFilter)
+  const [projectFilter, setProjectFilter] = useState(calendarViewState.projectFilter || lastCalendarProjectFilter)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [loading, setLoading] = useState(!initialCalendarCache)
   const [initialized, setInitialized] = useState(lastCalendarProjects.length > 0)
   const [initError, setInitError] = useState('')
-  const [showCompleted, setShowCompleted] = useState(calendarDefaults.showCompleted)
-  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all')
+  const [showCompleted, setShowCompleted] = useState(calendarViewState.showCompleted ?? calendarDefaults.showCompleted)
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>((calendarViewState.assigneeFilter || 'all') as AssigneeFilter)
   const [overviewPanelVisible, setOverviewPanelVisibleState] = useState(getOverviewPanelVisible)
   const [moveError, setMoveError] = useState('')
   const [activeDragTaskId, setActiveDragTaskId] = useState('')
@@ -288,6 +326,7 @@ export default function CalendarPage() {
       setProjectFilter('all')
       lastCalendarProjectFilter = 'all'
       setCurrentDate(new Date())
+      setCalendarViewState({ showCompleted: defaults.showCompleted, assigneeFilter: 'all', projectFilter: 'all' })
       await loadTasks({ showCompletedOverride: defaults.showCompleted, projectFilterOverride: 'all' })
     } finally {
       window.setTimeout(() => setResetSpinning(false), 450)
@@ -354,8 +393,9 @@ export default function CalendarPage() {
       const initialProjectId = context.projects.some((project) => project.id === lastCalendarProject)
         ? lastCalendarProject
         : context.activeProjectId
-      const initialProjectFilter = lastCalendarProjectFilter === 'all' || context.projects.some((project) => project.id === lastCalendarProjectFilter)
-        ? lastCalendarProjectFilter
+      const storedProjectFilter = calendarViewState.projectFilter || lastCalendarProjectFilter
+      const initialProjectFilter = storedProjectFilter === 'all' || context.projects.some((project) => project.id === storedProjectFilter)
+        ? storedProjectFilter
         : 'all'
       const initialProjectIds = initialProjectFilter === 'all'
         ? context.projects.map((project) => project.id)
@@ -367,6 +407,7 @@ export default function CalendarPage() {
       setActiveWorkspace(context.workspace.id)
       setActiveProject(initialProjectId)
       setProjectFilter(initialProjectFilter)
+      setCalendarViewState({ projectFilter: initialProjectFilter })
       setCachedTasks(calendarTasks)
       setOverviewTasks(overviewTasks)
       lastCalendarProjects = context.projects
@@ -393,6 +434,7 @@ export default function CalendarPage() {
   const handleProjectFilterChange = (projectId: string) => {
     setProjectFilter(projectId)
     lastCalendarProjectFilter = projectId
+    setCalendarViewState({ projectFilter: projectId })
     if (projectId !== 'all') {
       setActiveProject(projectId)
       setStoredProjectId(activeWorkspace, projectId)
@@ -424,6 +466,7 @@ export default function CalendarPage() {
       if (projectFilter !== 'all' && projectFilter !== targetProjectId) {
         setProjectFilter(targetProjectId)
         lastCalendarProjectFilter = targetProjectId
+        setCalendarViewState({ projectFilter: targetProjectId })
       }
       if (task.dueDate && (projectFilter === 'all' || projectFilter === targetProjectId)) {
         setCachedTasks((prev) => [task, ...prev])
@@ -544,7 +587,7 @@ export default function CalendarPage() {
 
   const getTasksForDay = (day: number): Task[] => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    return tasks.filter(t => t.dueDate && t.dueDate.split('T')[0] === dateStr && assigneeMatchesFilter(t.assignee, assigneeFilter))
+    return tasks.filter(t => dueDateToLocalDateKey(t.dueDate) === dateStr && assigneeMatchesFilter(t.assignee, assigneeFilter))
   }
 
   const totalCalendarCells = startDayOfWeek + daysInMonth + trailingEmptyDays
@@ -576,7 +619,7 @@ export default function CalendarPage() {
     const nextDate = formatDateForDay(nextDay)
     const original = tasks.find((t) => t.id === taskId)
     if (!original?.dueDate) return
-    const currentDateOnly = original.dueDate.split('T')[0]
+    const currentDateOnly = dueDateToLocalDateKey(original.dueDate)
     if (currentDateOnly === nextDate) return
 
     setMoveError('')
@@ -586,7 +629,7 @@ export default function CalendarPage() {
       setCachedTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, dueDate: updated.dueDate ?? nextDate } : t)))
       if (selectedTask?.id === taskId) {
         setSelectedTask((prev) => (prev ? { ...prev, dueDate: updated.dueDate ?? nextDate } : prev))
-        setEditDueDate((updated.dueDate ?? nextDate).split('T')[0])
+        setEditDueDate(dueDateToLocalDateKey(updated.dueDate ?? nextDate))
       }
       await refreshOverviewStats()
     } catch (err) {
@@ -610,7 +653,7 @@ export default function CalendarPage() {
     setSelectedTask(task)
     setEditTitle(task.title); setEditDescription(task.description || '')
     setEditPriority(task.priority)
-    setEditDueDate(task.dueDate ? task.dueDate.split('T')[0] : '')
+    setEditDueDate(dueDateToLocalDateKey(task.dueDate))
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
     setPanelLoading(true); setSubtasks([]); setComments([]); setShowSubtaskForm(false)
@@ -622,7 +665,7 @@ export default function CalendarPage() {
       ])
       setEditTitle(taskData.title); setEditDescription(taskData.description || '')
       setEditPriority(taskData.priority)
-      setEditDueDate(taskData.dueDate ? taskData.dueDate.split('T')[0] : '')
+      setEditDueDate(dueDateToLocalDateKey(taskData.dueDate))
       setEditAssignee(normalizeAssignee(taskData.assignee))
       setEditProjectId(taskData.projectId || activeProject)
       setEditTags(taskData.labels ? JSON.parse(taskData.labels) : [])
@@ -675,15 +718,58 @@ export default function CalendarPage() {
         title: newSubtaskTitle.trim(), priority: newSubtaskPriority,
       })
       setSubtasks((prev) => [...prev, subtask])
+      setCachedTasks((prev) => prev.map((task) => (
+        task.id === selectedTask.id
+          ? { ...task, subtaskTotal: (task.subtaskTotal || 0) + 1 }
+          : task
+      )))
+      setOverviewTasks((prev) => prev.map((task) => (
+        task.id === selectedTask.id
+          ? { ...task, subtaskTotal: (task.subtaskTotal || 0) + 1 }
+          : task
+      )))
+      setSelectedTask((prev) => prev ? { ...prev, subtaskTotal: (prev.subtaskTotal || 0) + 1 } : prev)
       setNewSubtaskTitle(''); setNewSubtaskPriority(2); setShowSubtaskForm(false)
     } catch (err) { console.error(err) }
     finally { setAddingSubtask(false) }
   }
 
+  const handleUpdateSubtask = async (subtaskId: string, updates: Partial<{ title: string; priority: number; archived: boolean }>) => {
+    const previousSubtask = subtasks.find((st) => st.id === subtaskId)
+    const updated = await taskApi.updateSubtask(subtaskId, updates)
+    setSubtasks((prev) => prev.map((st) => st.id === subtaskId ? updated : st))
+    if (selectedTask && previousSubtask && previousSubtask.archived !== updated.archived) {
+      const completedDelta = updated.archived ? 1 : -1
+      const updateCounts = (task: Task) => task.id === selectedTask.id
+        ? {
+            ...task,
+            subtaskCompleted: Math.max((task.subtaskCompleted || 0) + completedDelta, 0),
+          }
+        : task
+      setCachedTasks((prev) => prev.map(updateCounts))
+      setOverviewTasks((prev) => prev.map(updateCounts))
+      setSelectedTask((prev) => prev ? updateCounts(prev) : prev)
+    }
+  }
+
   const handleDeleteSubtask = async (subtaskId: string) => {
+    const deletingSubtask = subtasks.find((st) => st.id === subtaskId)
     try {
       await taskApi.deleteSubtask(subtaskId)
       setSubtasks((prev) => prev.filter((st) => st.id !== subtaskId))
+      if (selectedTask) {
+        const completedDelta = deletingSubtask?.archived ? -1 : 0
+        const updateCounts = (task: Task) => task.id === selectedTask.id
+          ? {
+              ...task,
+              subtaskTotal: Math.max((task.subtaskTotal || 0) - 1, 0),
+              subtaskCompleted: Math.max((task.subtaskCompleted || 0) + completedDelta, 0),
+            }
+          : task
+        setCachedTasks((prev) => prev.map(updateCounts))
+        setOverviewTasks((prev) => prev.map(updateCounts))
+        setSelectedTask((prev) => prev ? updateCounts(prev) : prev)
+      }
     } catch (err) { console.error(err) }
   }
 
@@ -697,6 +783,18 @@ export default function CalendarPage() {
       setNewComment('')
     } catch (err) { console.error(err) }
     finally { setSubmittingComment(false) }
+  }
+
+  const handleUpdateComment = async (commentId: string, content: string) => {
+    if (!selectedTask) return
+    const updated = await taskApi.updateComment(selectedTask.id, commentId, content)
+    setComments((prev) => prev.map((comment) => comment.id === commentId ? updated : comment))
+  }
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!selectedTask) return
+    await taskApi.deleteComment(selectedTask.id, commentId)
+    setComments((prev) => prev.filter((comment) => comment.id !== commentId))
   }
 
   const handleDeleteTask = async () => {
@@ -719,12 +817,14 @@ export default function CalendarPage() {
     .filter((task) => assigneeMatchesFilter(task.assignee, assigneeFilter))
     .filter((task) => showCompleted || !task.archived)
   const displayedStats = getTaskOverviewStats(filteredOverviewTasks)
-  const agendaTasks = agendaDay ? getTasksForDay(agendaDay).sort((a, b) => Number(a.archived) - Number(b.archived)) : []
+  const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
+  const getProjectName = (task: Task) => (task.projectId ? projectNameById.get(task.projectId) : undefined) || 'Project'
+  const agendaTasks = agendaDay ? getTasksForDay(agendaDay).sort(compareAgendaTasks) : []
   const mobileAgendaDays = Array.from({ length: daysInMonth }, (_, index) => {
     const day = index + 1
     return {
       day,
-      tasks: getTasksForDay(day).sort((a, b) => Number(a.archived) - Number(b.archived)),
+      tasks: getTasksForDay(day).sort(compareAgendaTasks),
     }
   }).filter(({ tasks }) => tasks.length > 0)
   const showBlockingLoader = loading && visibleCalendarTasks.length > 0
@@ -751,7 +851,7 @@ export default function CalendarPage() {
         <div className="flex justify-between items-center"><span className="text-zinc-400 text-xs">Completed</span><span className="text-zinc-500 font-medium text-xs">{displayedStats.completed}</span></div>
         <div className="flex justify-between items-center"><span className="text-zinc-400 text-xs">Critical</span><span className="text-red-400 font-medium text-xs">{displayedStats.critical}</span></div>
         <div className="flex justify-between items-center"><span className="text-zinc-400 text-xs">High</span><span className="text-orange-400 font-medium text-xs">{displayedStats.high}</span></div>
-        <div className="flex justify-between items-center"><span className="text-zinc-400 text-xs">Medium</span><span className="text-yellow-400 font-medium text-xs">{displayedStats.medium}</span></div>
+        <div className="flex justify-between items-center"><span className="text-zinc-400 text-xs">Medium</span><span className="text-[var(--priority-medium)] font-medium text-xs">{displayedStats.medium}</span></div>
         <div className="flex justify-between items-center"><span className="text-zinc-400 text-xs">Low</span><span className="text-zinc-400 font-medium text-xs">{displayedStats.low}</span></div>
       </div>
     </div>
@@ -819,7 +919,11 @@ export default function CalendarPage() {
               )}
               <select
                 value={assigneeFilter}
-                onChange={(e) => setAssigneeFilter(e.target.value as AssigneeFilter)}
+                onChange={(e) => {
+                  const nextAssigneeFilter = e.target.value as AssigneeFilter
+                  setAssigneeFilter(nextAssigneeFilter)
+                  setCalendarViewState({ assigneeFilter: nextAssigneeFilter })
+                }}
                 className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
                 style={{ width: 158, minWidth: 158 }}
               >
@@ -839,7 +943,13 @@ export default function CalendarPage() {
                 </button>
               </div>
               <button
-                onClick={() => setShowCompleted((v) => !v)}
+                onClick={() => {
+                  setShowCompleted((v) => {
+                    const nextShowCompleted = !v
+                    setCalendarViewState({ showCompleted: nextShowCompleted })
+                    return nextShowCompleted
+                  })
+                }}
                 className="btn btn-secondary text-xs fc-control shrink-0"
                 title={showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
               >
@@ -873,7 +983,7 @@ export default function CalendarPage() {
                       </div>
                       <div className="space-y-2">
                         {tasks.map((task) => (
-                          <CalendarAgendaTaskRow key={task.id} task={task} onOpen={openTaskPanel} />
+                          <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} onOpen={openTaskPanel} />
                         ))}
                       </div>
                     </section>
@@ -897,7 +1007,7 @@ export default function CalendarPage() {
                   {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1
                     const cellIndex = startDayOfWeek + i
-                    const dayTasks = getTasksForDay(day).sort((a, b) => Number(a.archived) - Number(b.archived))
+                    const dayTasks = getTasksForDay(day).sort(compareAgendaTasks)
                     const visibleTasks = dayTasks.slice(0, MAX_VISIBLE_DAY_TASKS)
                     const hiddenTasks = dayTasks.slice(MAX_VISIBLE_DAY_TASKS)
                     return (
@@ -965,7 +1075,7 @@ export default function CalendarPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {agendaTasks.map((task) => (
-                <CalendarAgendaTaskRow key={task.id} task={task} onOpen={openTaskPanel} />
+                <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} onOpen={openTaskPanel} />
               ))}
             </div>
           </div>
@@ -1009,8 +1119,11 @@ export default function CalendarPage() {
           onReopen={handleReopenTask}
           onDelete={handleDeleteTask}
           onAddSubtask={handleAddSubtask}
+          onUpdateSubtask={handleUpdateSubtask}
           onDeleteSubtask={handleDeleteSubtask}
           onAddComment={handleAddComment}
+          onUpdateComment={handleUpdateComment}
+          onDeleteComment={handleDeleteComment}
           projectId={activeProject}
           projects={projects}
           icon="calendar"
@@ -1045,10 +1158,14 @@ export default function CalendarPage() {
                 <textarea
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
+                  maxLength={DESCRIPTION_MAX_LENGTH}
                   rows={2}
                   className="input resize-none"
                   placeholder="Add details..."
                 />
+                <div className={`mt-1 text-right text-[10px] leading-none ${newDescription.length > DESCRIPTION_MAX_LENGTH * 0.9 ? 'text-amber-300' : 'text-zinc-400'}`} aria-live="polite">
+                  {newDescription.length}/{DESCRIPTION_MAX_LENGTH}
+                </div>
               </div>
               <div>
                 <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Project</label>
@@ -1074,9 +1191,9 @@ export default function CalendarPage() {
                           key={p}
                           type="button"
                           onClick={() => setNewPriority(p)}
-                          className={`badge ${config.badge} w-full justify-center border py-2 transition-all ${isActive ? 'ring-1 ring-current' : 'opacity-80 hover:opacity-100'}`}
+                          className={`badge ${config.badge} w-full justify-center border py-2 transition-all ${isActive ? 'opacity-100' : 'opacity-80 hover:opacity-100'}`}
+                          style={isActive ? { background: config.color, borderColor: config.color, color: config.activeTextColor } : undefined}
                         >
-                          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: config.color }} />
                           {config.label}
                         </button>
                       )
@@ -1086,11 +1203,11 @@ export default function CalendarPage() {
                 <div className="fc-new-task-date-field">
                   <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Due Date</label>
                   <div className="fc-new-task-date-row">
-                    <input
-                      type="date"
+                    <DatePicker
                       value={newDueDate}
-                      onChange={(e) => setNewDueDate(e.target.value)}
-                      className="input fc-date-input fc-new-task-date-input min-w-0 flex-1 text-xs"
+                      onChange={setNewDueDate}
+                      className="min-w-0 flex-1"
+                      buttonClassName="fc-date-input fc-new-task-date-input"
                     />
                     {newDueDate ? (
                       <button

@@ -5,13 +5,48 @@ import { eq, asc, desc, and, isNull } from 'drizzle-orm'
 import { hydrateTaskWithTags, hydrateTasksWithTags, replaceTaskTags } from '../lib/taskTags'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const COMMENT_MAX_LENGTH = 1000
+const DESCRIPTION_MAX_LENGTH = 5000
 
 function isValidUUID(s: string): boolean {
   return UUID_REGEX.test(s)
 }
 
+function addSubtaskCounts<T extends { id: string }>(taskRows: T[], allProjectTasks: Array<{ parentId: string | null; archived: boolean }>): T[] {
+  const counts = new Map<string, { total: number; completed: number }>()
+
+  for (const task of allProjectTasks) {
+    if (!task.parentId) continue
+    const current = counts.get(task.parentId) || { total: 0, completed: 0 }
+    current.total += 1
+    if (task.archived) current.completed += 1
+    counts.set(task.parentId, current)
+  }
+
+  return taskRows.map((task) => {
+    const count = counts.get(task.id)
+    return {
+      ...task,
+      subtaskTotal: count?.total ?? 0,
+      subtaskCompleted: count?.completed ?? 0,
+    }
+  })
+}
+
+function isTooLong(value: string | undefined, maxLength: number): boolean {
+  return value !== undefined && value.length > maxLength
+}
+
 function localDateKey(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function startOfNextMondayFirstWeek(today: Date): Date {
+  const start = new Date(today)
+  start.setHours(0, 0, 0, 0)
+  const dayOffset = (8 - start.getDay()) % 7 || 7
+  start.setDate(start.getDate() + dayOffset)
+  return start
 }
 
 function parseDueDateInput(input: string): Date {
@@ -37,6 +72,16 @@ function taskDueDateKey(dueDate: Date | string | null): string | null {
     date.getUTCMilliseconds() === 0
 
   return isUtcMidnight ? date.toISOString().slice(0, 10) : localDateKey(date)
+}
+
+function readActivityChanges(raw: string | null): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -169,6 +214,9 @@ export async function taskRoutes(fastify: FastifyInstance) {
     if (!projectId || !title) {
       return reply.status(400).send({ error: 'projectId and title are required' })
     }
+    if (isTooLong(description, DESCRIPTION_MAX_LENGTH)) {
+      return reply.status(400).send({ error: `Description must be ${DESCRIPTION_MAX_LENGTH} chars or less` })
+    }
 
     // ── Natural Language Parsing ──────────────────────────────────────────
     const combinedText = `${title} ${description || ''}`
@@ -251,7 +299,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const { sort, order, filter, includeArchived } = request.query as {
       sort?: 'priority' | 'dueDate' | 'createdAt'
       order?: 'asc' | 'desc'
-      filter?: 'all' | 'dueToday' | 'dueThisWeek' | 'pastDue' | 'noDate' | 'archived'
+      filter?: 'all' | 'dueToday' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
       includeArchived?: string
     }
 
@@ -270,9 +318,10 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const sortField = sort === 'dueDate' ? tasks.dueDate : sort === 'createdAt' ? tasks.createdAt : tasks.priority
     const sortDirection = order === 'desc' ? desc(sortField) : asc(sortField)
 
-    let result = await db.select().from(tasks)
+    const allProjectTasks = await db.select().from(tasks)
       .where(eq(tasks.projectId, projectId))
       .orderBy(asc(tasks.archived), sortDirection)
+    let result = allProjectTasks
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -280,6 +329,11 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const nextWeek = new Date(today)
     nextWeek.setDate(nextWeek.getDate() + 7)
     const nextWeekKey = localDateKey(nextWeek)
+    const nextCalendarWeekStart = startOfNextMondayFirstWeek(today)
+    const nextCalendarWeekEnd = new Date(nextCalendarWeekStart)
+    nextCalendarWeekEnd.setDate(nextCalendarWeekEnd.getDate() + 7)
+    const nextCalendarWeekStartKey = localDateKey(nextCalendarWeekStart)
+    const nextCalendarWeekEndKey = localDateKey(nextCalendarWeekEnd)
     const shouldIncludeArchived = includeArchived === 'true'
     const isVisibleForDateFilter = (task: typeof result[number]) => shouldIncludeArchived || !task.archived
 
@@ -295,6 +349,11 @@ export async function taskRoutes(fastify: FastifyInstance) {
         const dueKey = taskDueDateKey(t.dueDate)
         return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= todayKey && dueKey < nextWeekKey
       })
+    } else if (filter === 'dueNextWeek') {
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= nextCalendarWeekStartKey && dueKey < nextCalendarWeekEndKey
+      })
     } else if (filter === 'pastDue') {
       result = result.filter(t => {
         const dueKey = taskDueDateKey(t.dueDate)
@@ -309,7 +368,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       result = result.filter(t => !t.archived)
     }
 
-    const hydrated = hydrateTasksWithTags(result)
+    const hydrated = addSubtaskCounts(hydrateTasksWithTags(result), allProjectTasks)
     return reply.send(hydrated)
   })
 
@@ -344,6 +403,9 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const existingTask = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
     if (existingTask.length === 0) {
       return reply.status(404).send({ error: 'Task not found' })
+    }
+    if (isTooLong(updates.description, DESCRIPTION_MAX_LENGTH)) {
+      return reply.status(400).send({ error: `Description must be ${DESCRIPTION_MAX_LENGTH} chars or less` })
     }
 
     const setObj: Record<string, any> = { ...updates }
@@ -422,16 +484,54 @@ export async function taskRoutes(fastify: FastifyInstance) {
   fastify.post('/:id/comments', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string }
     const { content } = request.body as { content: string }
-    if (!content || content.length > 1000) {
-      return reply.status(400).send({ error: 'Comment must be 1-1000 chars' })
+    const nextContent = content?.trim()
+    if (!nextContent || nextContent.length > COMMENT_MAX_LENGTH) {
+      return reply.status(400).send({ error: `Comment must be 1-${COMMENT_MAX_LENGTH} chars` })
     }
     await db.insert(activityLog).values({
       taskId: id,
       action: 'comment',
-      changes: JSON.stringify({ content }),
+      changes: JSON.stringify({ content: nextContent }),
       userId: undefined
     })
     return reply.status(201).send({ success: true })
+  })
+
+  // PATCH /tasks/:id/comments/:commentId — edit an existing comment
+  fastify.patch('/:id/comments/:commentId', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id, commentId } = request.params as { id: string; commentId: string }
+    const { content } = request.body as { content: string }
+    const nextContent = content?.trim()
+    if (!isValidUUID(id) || !isValidUUID(commentId)) return reply.status(400).send({ error: 'Invalid comment ID' })
+    if (!nextContent || nextContent.length > COMMENT_MAX_LENGTH) {
+      return reply.status(400).send({ error: `Comment must be 1-${COMMENT_MAX_LENGTH} chars` })
+    }
+
+    const existing = await db.select().from(activityLog)
+      .where(and(eq(activityLog.id, commentId), eq(activityLog.taskId, id), eq(activityLog.action, 'comment')))
+      .limit(1)
+    if (existing.length === 0) return reply.status(404).send({ error: 'Comment not found' })
+
+    const [updated] = await db.update(activityLog)
+      .set({ changes: JSON.stringify({ ...readActivityChanges(existing[0].changes), content: nextContent }) })
+      .where(eq(activityLog.id, commentId))
+      .returning()
+
+    return reply.send(updated)
+  })
+
+  // DELETE /tasks/:id/comments/:commentId — delete an existing comment
+  fastify.delete('/:id/comments/:commentId', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id, commentId } = request.params as { id: string; commentId: string }
+    if (!isValidUUID(id) || !isValidUUID(commentId)) return reply.status(400).send({ error: 'Invalid comment ID' })
+
+    const existing = await db.select({ id: activityLog.id }).from(activityLog)
+      .where(and(eq(activityLog.id, commentId), eq(activityLog.taskId, id), eq(activityLog.action, 'comment')))
+      .limit(1)
+    if (existing.length === 0) return reply.status(404).send({ error: 'Comment not found' })
+
+    await db.delete(activityLog).where(eq(activityLog.id, commentId))
+    return reply.status(204).send()
   })
 
   // Reorder tasks within a project
@@ -485,7 +585,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     if (!isValidUUID(id)) return reply.send([])
 
     const result = await db.select().from(tasks)
-      .where(and(eq(tasks.parentId, id), eq(tasks.archived, false)))
+      .where(eq(tasks.parentId, id))
       .orderBy(asc(tasks.position))
 
     return reply.send(result)
@@ -500,6 +600,9 @@ export async function taskRoutes(fastify: FastifyInstance) {
       priority?: number
     }
     if (!title) return reply.status(400).send({ error: 'title is required' })
+    if (isTooLong(description, DESCRIPTION_MAX_LENGTH)) {
+      return reply.status(400).send({ error: `Description must be ${DESCRIPTION_MAX_LENGTH} chars or less` })
+    }
 
     // Get the parent task to find its projectId
     const parent = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
@@ -527,6 +630,38 @@ export async function taskRoutes(fastify: FastifyInstance) {
     if (!subtask) return reply.status(500).send({ error: 'Failed to create subtask' })
 
     return reply.status(201).send(hydrateTaskWithTags(subtask))
+  })
+
+  // PATCH /subtasks/:id — update a subtask
+  fastify.patch('/subtasks/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const updates = request.body as Partial<{
+      title: string
+      description: string
+      priority: number
+      archived: boolean
+    }>
+    if (!isValidUUID(id)) return reply.status(400).send({ error: 'Invalid subtask ID' })
+
+    const existing = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
+    if (existing.length === 0 || !existing[0].parentId) return reply.status(404).send({ error: 'Subtask not found' })
+    if (updates.title !== undefined && !updates.title.trim()) return reply.status(400).send({ error: 'title is required' })
+    if (isTooLong(updates.description, DESCRIPTION_MAX_LENGTH)) {
+      return reply.status(400).send({ error: `Description must be ${DESCRIPTION_MAX_LENGTH} chars or less` })
+    }
+
+    const setObj: Record<string, any> = { updatedAt: new Date() }
+    if (updates.title !== undefined) setObj.title = updates.title.trim()
+    if (updates.description !== undefined) setObj.description = updates.description || null
+    if (updates.priority !== undefined) setObj.priority = updates.priority
+    if (updates.archived !== undefined) setObj.archived = updates.archived
+
+    const [subtask] = await db.update(tasks)
+      .set(setObj)
+      .where(eq(tasks.id, id))
+      .returning()
+
+    return reply.send(hydrateTaskWithTags(subtask))
   })
 
   // DELETE /subtasks/:id — delete a subtask

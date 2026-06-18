@@ -1,10 +1,10 @@
 import { BarChart3, Bot, Circle, User } from 'lucide-react'
 
-export const PRIORITY_CONFIG: Record<number, { label: string; badge: string; icon: typeof BarChart3; color: string; bgColor: string }> = {
-  1: { label: 'Critical', badge: 'badge-critical', icon: BarChart3, color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)' },
-  2: { label: 'High', badge: 'badge-high', icon: BarChart3, color: '#f97316', bgColor: 'rgba(249,115,22,0.15)' },
-  3: { label: 'Medium', badge: 'badge-medium', icon: BarChart3, color: '#eab308', bgColor: 'rgba(234,179,8,0.15)' },
-  4: { label: 'Low', badge: 'badge-low', icon: BarChart3, color: '#a1a1aa', bgColor: 'rgba(113,113,122,0.12)' },
+export const PRIORITY_CONFIG: Record<number, { label: string; badge: string; icon: typeof BarChart3; color: string; bgColor: string; borderColor: string; activeTextColor: string }> = {
+  1: { label: 'Critical', badge: 'badge-critical', icon: BarChart3, color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.2)', activeTextColor: '#ffffff' },
+  2: { label: 'High', badge: 'badge-high', icon: BarChart3, color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.2)', activeTextColor: '#18181b' },
+  3: { label: 'Medium', badge: 'badge-medium', icon: BarChart3, color: 'var(--priority-medium)', bgColor: 'var(--priority-medium-bg)', borderColor: 'var(--priority-medium-border)', activeTextColor: 'var(--priority-medium-active-text)' },
+  4: { label: 'Low', badge: 'badge-low', icon: BarChart3, color: '#a1a1aa', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', activeTextColor: '#18181b' },
 }
 
 export const TAG_COLORS = [
@@ -13,7 +13,7 @@ export const TAG_COLORS = [
   { bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.3)', text: '#3b82f6' },
   { bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.3)', text: '#a855f7' },
   { bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', text: '#f97316' },
-  { bg: 'rgba(234,179,8,0.15)', border: 'rgba(234,179,8,0.3)', text: '#eab308' },
+  { bg: 'var(--tag-yellow-bg)', border: 'var(--tag-yellow-border)', text: 'var(--tag-yellow)' },
 ]
 
 export type AssigneeValue = 'user' | 'agent' | ''

@@ -1,24 +1,60 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
+import { localDateKey } from '@/lib/dates'
 
 interface DatePickerProps {
   value: string // YYYY-MM-DD
   onChange: (date: string) => void
   placeholder?: string
   className?: string
+  buttonClassName?: string
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 
-export function DatePicker({ value, onChange, placeholder = 'Select date', className = '' }: DatePickerProps) {
+export function DatePicker({ value, onChange, placeholder = 'Select date', className = '', buttonClassName = '' }: DatePickerProps) {
   const [open, setOpen] = useState(false)
+  const [placement, setPlacement] = useState<'top' | 'bottom'>('bottom')
+  const [align, setAlign] = useState<'left' | 'right'>('left')
   const [viewDate, setViewDate] = useState(() => {
     if (value) return new Date(value + 'T00:00:00')
     return new Date()
   })
   const ref = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open) return
+
+    const updatePlacement = () => {
+      const rect = ref.current?.getBoundingClientRect()
+      if (!rect) return
+
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+      const viewportWidth = window.visualViewport?.width ?? window.innerWidth
+      const popupHeight = 320
+      const popupWidth = Math.min(352, viewportWidth - 24)
+      const spaceBelow = viewportHeight - rect.bottom
+      const spaceAbove = rect.top
+
+      setPlacement(spaceBelow >= popupHeight || spaceBelow >= spaceAbove ? 'bottom' : 'top')
+      setAlign(rect.left + popupWidth > viewportWidth - 12 ? 'right' : 'left')
+    }
+
+    updatePlacement()
+    window.addEventListener('resize', updatePlacement)
+    window.addEventListener('scroll', updatePlacement, true)
+    window.visualViewport?.addEventListener('resize', updatePlacement)
+    window.visualViewport?.addEventListener('scroll', updatePlacement)
+
+    return () => {
+      window.removeEventListener('resize', updatePlacement)
+      window.removeEventListener('scroll', updatePlacement, true)
+      window.visualViewport?.removeEventListener('resize', updatePlacement)
+      window.visualViewport?.removeEventListener('scroll', updatePlacement)
+    }
+  }, [open])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -27,6 +63,10 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  useEffect(() => {
+    if (value) setViewDate(new Date(value + 'T00:00:00'))
+  }, [value])
 
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
@@ -44,8 +84,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
 
   const selectDate = (day: number) => {
     const d = new Date(year, month, day)
-    const iso = d.toISOString().split('T')[0]
-    onChange(iso)
+    onChange(localDateKey(d))
     setOpen(false)
   }
 
@@ -63,7 +102,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="input text-xs w-full flex items-center gap-2 justify-between"
+        className={`input text-xs w-full flex items-center gap-2 justify-between ${buttonClassName}`}
       >
         <span className={value ? 'text-zinc-200' : 'text-zinc-500'}>{formatDisplay()}</span>
         <Calendar className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
@@ -71,7 +110,9 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
 
       {open && (
         <div
-          className="absolute left-0 top-full z-50 mt-1 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3 shadow-2xl"
+          className={`absolute z-50 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3 shadow-2xl ${
+            placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
+          } ${align === 'right' ? 'right-0' : 'left-0'}`}
           style={{ width: 'min(22rem, calc(100vw - 24px))' }}
         >
           {/* Header */}
@@ -127,8 +168,9 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
           <button
             onClick={() => {
               const t = new Date(); t.setHours(0,0,0,0)
-              selectDate(t.getDate())
+              onChange(localDateKey(t))
               setViewDate(t)
+              setOpen(false)
             }}
             className="mt-2 w-full text-[10px] text-zinc-500 hover:text-[var(--accent)] text-center transition-colors"
           >

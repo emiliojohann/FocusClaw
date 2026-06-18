@@ -79,7 +79,7 @@ const TAG_COLORS = [
   { bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.3)', text: '#3b82f6' },
   { bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.3)', text: '#a855f7' },
   { bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', text: '#f97316' },
-  { bg: 'rgba(234,179,8,0.15)', border: 'rgba(234,179,8,0.3)', text: '#eab308' },
+  { bg: 'var(--tag-yellow-bg)', border: 'var(--tag-yellow-border)', text: 'var(--tag-yellow)' },
 ]
 
 const HOUR_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1)
@@ -703,6 +703,7 @@ export default function SettingsPage() {
                   <option value="all">Active Tasks</option>
                   <option value="dueToday">Due Today</option>
                   <option value="dueThisWeek">Due This Week</option>
+                  <option value="dueNextWeek">Due Next Week</option>
                   <option value="pastDue">Past Due</option>
                   <option value="noDate">No Date</option>
                   <option value="archived">Completed</option>

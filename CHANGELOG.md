@@ -1,6 +1,30 @@
 # Changelog
 
+## v2026.6.18 - 2026-06-18
+
+- Includes all FocusClaw changes since `v2026.6.16`.
+- Fixed local due-date handling so calendar dates stay stable across local timezone parsing.
+- Added task description and comment character counters with corrected limits and alignment.
+- Added subtask completion/editing support and improved subtask indicators/action spacing.
+- Improved agenda priority ordering, removed duplicate priority labeling, and refined task metadata pills.
+- Polished mobile task-card metadata layout.
+- Replaced native browser due-date popups with FocusClaw's Monday-first date picker.
+- Persisted active Tasks and Calendar filters separately from Settings defaults.
+- Removed redundant completed-task `Done` labels from task cards and agenda rows.
+- Reduced the extra Tasks first-load refresh delay.
+- Added a `Next Week` Tasks status filter.
+- Made task comment links clickable and added edit/delete support for task comments.
+- Improved date picker placement so it can flip above fields when space is tight.
+- Improved light-mode link hover and medium-priority contrast.
+- Tightened comment action controls for desktop and mobile metadata fit.
+- Refined selected priority buttons with filled active states and removed selector dots.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.18` / `v2026.6.18`.
+
 ## v2026.6.16 - 2026-06-16
+
+### Thanks
+
+Special thanks to https://x.com/m_zokov for the help provided on this release.
 
 - Added a FocusClaw OpenClaw skill wrapper so agents can discover when and how to use FocusClaw.
 - Added Hermes integration guidance for using FocusClaw through the local REST API.
@@ -22,18 +46,13 @@
 
 ## v2026.6.12 - 2026-06-13
 
-- Added OpenClaw command coverage for projects, tags, due dates, priorities, backups, and app version checks.
-- Added universal tags, project deletion, metadata polish, and public release documentation.
-- Improved mobile layouts with a compact top bar and cleaner navigation behavior.
-- Added latest GitHub release visibility in the app shell and Settings/About.
-- Fixed task due date filters so overdue/upcoming/no-due-date queries are handled correctly.
-- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.12` / `v2026.6.12`.
-
-## v2026.6.11 - 2026-06-11
-
+- Includes the earlier `v2026.6.11` app polish that was never released separately.
 - Fixed task edits so clearing an existing due date persists a null due date.
 - Added a Settings contact/feedback card for `social@focusclaw.app`.
 - Added lightweight GitHub latest-release visibility in the app shell and Settings/About.
-- Added a compact mobile top bar with the FocusClaw logo while keeping bottom navigation.
+- Added a compact mobile top bar with the FocusClaw logo while keeping bottom navigation and improving mobile navigation behavior.
 - Capped the default Tasks list display at 50 matching tasks with a Show more affordance.
-- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.11` / `v2026.6.11`.
+- Added OpenClaw command coverage for projects, tags, due dates, priorities, backups, and app version checks.
+- Added universal tags, project deletion, metadata polish, and public release documentation.
+- Fixed task due date filters so overdue/upcoming/no-due-date queries are handled correctly.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.12` / `v2026.6.12`.

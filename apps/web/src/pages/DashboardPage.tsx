@@ -4,11 +4,12 @@ import { taskApi, tagApi } from '@/lib/api'
 import {
   Check, Plus, X,
   ChevronRight, AlertCircle, RefreshCw, Clock,
-  PanelLeftClose, PanelLeftOpen, LayoutGrid, List
+  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
+import { DatePicker } from '@/components/DatePicker'
 import { TaskPanel } from '@/components/TaskPanel'
-import { getOverviewPanelVisible, getTaskViewDefaults, getTaskViewMode, setOverviewPanelVisible, setTaskViewMode, type TaskFilter, type TaskSort, type TaskViewMode } from '@/lib/viewSettings'
+import { getOverviewPanelVisible, getTaskViewDefaults, getTaskViewMode, getTaskViewState, setOverviewPanelVisible, setTaskViewMode, setTaskViewState, type TaskFilter, type TaskSort, type TaskViewMode } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
 import {
   ASSIGNEE_OPTIONS,
@@ -21,6 +22,7 @@ import {
   type AssigneeFilter,
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
+import { dueDateToLocalDateKey } from '@/lib/dates'
 
 interface Task {
   id: string
@@ -39,6 +41,8 @@ interface Task {
   aiReasoning?: string
   labels?: string
   tags?: TagRecord[]
+  subtaskTotal?: number
+  subtaskCompleted?: number
 }
 
 interface TagRecord {
@@ -111,6 +115,7 @@ function writeDashboardCache(snapshot: DashboardCache) {
 
 const initialDashboardCache = readDashboardCache()
 const TASK_VISIBLE_INCREMENT = 50
+const DESCRIPTION_MAX_LENGTH = 5000
 
 let lastDashboardTasks: Task[] = initialDashboardCache?.tasks ?? []
 let lastDashboardProjects: ProjectRecord[] = initialDashboardCache?.projects ?? []
@@ -121,7 +126,7 @@ let lastDashboardTags: TagRecord[] = initialDashboardCache?.tags ?? []
 
 function parseDueDateAsLocalDate(dateStr: string | undefined): Date | null {
   if (!dateStr) return null
-  const dateOnly = dateStr.split('T')[0]
+  const dateOnly = dueDateToLocalDateKey(dateStr)
   const parts = dateOnly.split('-').map(Number)
   if (parts.length === 3 && parts.every(Number.isFinite)) {
     const [year, month, day] = parts
@@ -176,17 +181,33 @@ function AssigneeBadge({ assignee }: { assignee?: string }) {
   )
 }
 
+function SubtaskIndicator({ task }: { task: Task }) {
+  const total = task.subtaskTotal || 0
+  if (total === 0) return null
+  const completed = task.subtaskCompleted || 0
+  return (
+    <span
+      className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-1.5 text-[10px] font-medium text-zinc-400"
+      title={`${completed}/${total} subtasks complete`}
+      aria-label={`${completed} of ${total} subtasks complete`}
+    >
+      <ListTree className="h-3 w-3 text-zinc-500" />
+      {completed}/{total}
+    </span>
+  )
+}
+
 export default function DashboardPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const taskViewDefaults = getTaskViewDefaults()
+  const taskViewState = getTaskViewState()
   const [tasks, setTasks] = useState<Task[]>(lastDashboardTasks)
   const [projects, setProjects] = useState<ProjectRecord[]>(lastDashboardProjects)
   const [activeWorkspace, setActiveWorkspace] = useState(lastDashboardWorkspace)
   const [activeProject, setActiveProject] = useState(lastDashboardProject)
-  const [projectFilter, setProjectFilter] = useState(lastDashboardProjectFilter)
+  const [projectFilter, setProjectFilter] = useState(taskViewState.projectFilter || lastDashboardProjectFilter)
   const [loading, setLoading] = useState(!initialDashboardCache)
-  const [initialRefreshComplete, setInitialRefreshComplete] = useState(!initialDashboardCache)
   const [initialized, setInitialized] = useState(lastDashboardProjects.length > 0)
   const [initError, setInitError] = useState('')
 
@@ -205,11 +226,11 @@ export default function DashboardPage() {
   const [newSubtaskPriority, setNewSubtaskPriority] = useState(2)
   const [addingSubtask, setAddingSubtask] = useState(false)
 
-  const [sort, setSort] = useState<TaskSort>(taskViewDefaults.sort)
-  const [filter, setFilter] = useState<TaskFilter>(taskViewDefaults.filter)
+  const [sort, setSort] = useState<TaskSort>(taskViewState.sort || taskViewDefaults.sort)
+  const [filter, setFilter] = useState<TaskFilter>(taskViewState.filter || taskViewDefaults.filter)
   const [allTags, setAllTags] = useState<TagRecord[]>(lastDashboardTags)
-  const [tagFilter, setTagFilter] = useState<string>('all')
-  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all')
+  const [tagFilter, setTagFilter] = useState<string>(taskViewState.tagFilter || 'all')
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>((taskViewState.assigneeFilter || 'all') as AssigneeFilter)
   const [overviewPanelVisible, setOverviewPanelVisibleState] = useState(getOverviewPanelVisible)
   const [viewMode, setViewModeState] = useState<TaskViewMode>(getTaskViewMode)
   const [visibleTaskCount, setVisibleTaskCount] = useState(TASK_VISIBLE_INCREMENT)
@@ -289,6 +310,13 @@ export default function DashboardPage() {
       lastDashboardProjectFilter = 'all'
       setTagFilter('all')
       setAssigneeFilter('all')
+      setTaskViewState({
+        sort: defaults.sort,
+        filter: defaults.filter,
+        projectFilter: 'all',
+        tagFilter: 'all',
+        assigneeFilter: 'all',
+      })
       await loadTasks({ sortOverride: defaults.sort, filterOverride: defaults.filter, projectFilterOverride: 'all' })
     } finally {
       window.setTimeout(() => setResetSpinning(false), 450)
@@ -311,8 +339,9 @@ export default function DashboardPage() {
   const initWorkspace = async () => {
     try {
       const context = await ensureProjectContext()
-      const initialProjectFilter = lastDashboardProjectFilter === 'all' || context.projects.some((project) => project.id === lastDashboardProjectFilter)
-        ? lastDashboardProjectFilter
+      const storedProjectFilter = taskViewState.projectFilter || lastDashboardProjectFilter
+      const initialProjectFilter = storedProjectFilter === 'all' || context.projects.some((project) => project.id === storedProjectFilter)
+        ? storedProjectFilter
         : context.activeProjectId
       const initialProjectIds = initialProjectFilter === 'all'
         ? context.projects.map((project) => project.id)
@@ -328,6 +357,7 @@ export default function DashboardPage() {
       setActiveWorkspace(context.workspace.id)
       setActiveProject(context.activeProjectId)
       setProjectFilter(initialProjectFilter)
+      setTaskViewState({ projectFilter: initialProjectFilter })
       setAllTags(initialTags)
       setCachedTasks(initialTasks)
       lastDashboardProjects = context.projects
@@ -348,7 +378,6 @@ export default function DashboardPage() {
       setInitError('Failed to connect to API. Make sure the server is running.')
     } finally {
       setLoading(false)
-      setInitialRefreshComplete(true)
     }
   }
 
@@ -356,6 +385,7 @@ export default function DashboardPage() {
     setProjectFilter(projectId)
     lastDashboardProjectFilter = projectId
     setTagFilter('all')
+    setTaskViewState({ projectFilter: projectId, tagFilter: 'all' })
     if (projectId !== 'all') {
       setActiveProject(projectId)
       setStoredProjectId(activeWorkspace, projectId)
@@ -445,6 +475,7 @@ export default function DashboardPage() {
       if (projectFilter !== 'all' && projectFilter !== targetProjectId) {
         setProjectFilter(targetProjectId)
         lastDashboardProjectFilter = targetProjectId
+        setTaskViewState({ projectFilter: targetProjectId })
       }
       setCachedTasks((prev) => [task, ...prev])
       setNewTitle(''); setNewDescription(''); setNewPriority(2)
@@ -527,7 +558,7 @@ export default function DashboardPage() {
     setSelectedTask(task)
     setEditTitle(task.title); setEditDescription(task.description || '')
     setEditPriority(task.priority)
-    setEditDueDate(task.dueDate ? task.dueDate.split('T')[0] : '')
+    setEditDueDate(dueDateToLocalDateKey(task.dueDate))
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
     setEditTags(task.labels ? JSON.parse(task.labels) : [])
@@ -538,7 +569,7 @@ export default function DashboardPage() {
       ])
       setEditTitle(taskData.title); setEditDescription(taskData.description || '')
       setEditPriority(taskData.priority)
-      setEditDueDate(taskData.dueDate ? taskData.dueDate.split('T')[0] : '')
+      setEditDueDate(dueDateToLocalDateKey(taskData.dueDate))
       setEditAssignee(normalizeAssignee(taskData.assignee))
       setEditProjectId(taskData.projectId || activeProject)
       setEditTags(taskData.labels ? JSON.parse(taskData.labels) : [])
@@ -579,15 +610,51 @@ export default function DashboardPage() {
         title: newSubtaskTitle.trim(), priority: newSubtaskPriority,
       })
       setSubtasks((prev) => [...prev, subtask])
+      setCachedTasks((prev) => prev.map((task) => (
+        task.id === selectedTask.id
+          ? { ...task, subtaskTotal: (task.subtaskTotal || 0) + 1 }
+          : task
+      )))
+      setSelectedTask((prev) => prev ? { ...prev, subtaskTotal: (prev.subtaskTotal || 0) + 1 } : prev)
       setNewSubtaskTitle(''); setNewSubtaskPriority(2); setShowSubtaskForm(false)
     } catch (err) { console.error(err) }
     finally { setAddingSubtask(false) }
   }
 
+  const handleUpdateSubtask = async (subtaskId: string, updates: Partial<{ title: string; priority: number; archived: boolean }>) => {
+    const previousSubtask = subtasks.find((st) => st.id === subtaskId)
+    const updated = await taskApi.updateSubtask(subtaskId, updates)
+    setSubtasks((prev) => prev.map((st) => st.id === subtaskId ? updated : st))
+    if (selectedTask && previousSubtask && previousSubtask.archived !== updated.archived) {
+      const completedDelta = updated.archived ? 1 : -1
+      const updateCounts = (task: Task) => task.id === selectedTask.id
+        ? {
+            ...task,
+            subtaskCompleted: Math.max((task.subtaskCompleted || 0) + completedDelta, 0),
+          }
+        : task
+      setCachedTasks((prev) => prev.map(updateCounts))
+      setSelectedTask((prev) => prev ? updateCounts(prev) : prev)
+    }
+  }
+
   const handleDeleteSubtask = async (subtaskId: string) => {
+    const deletingSubtask = subtasks.find((st) => st.id === subtaskId)
     try {
       await taskApi.deleteSubtask(subtaskId)
       setSubtasks((prev) => prev.filter((st) => st.id !== subtaskId))
+      if (selectedTask) {
+        const completedDelta = deletingSubtask?.archived ? -1 : 0
+        const updateCounts = (task: Task) => task.id === selectedTask.id
+          ? {
+              ...task,
+              subtaskTotal: Math.max((task.subtaskTotal || 0) - 1, 0),
+              subtaskCompleted: Math.max((task.subtaskCompleted || 0) + completedDelta, 0),
+            }
+          : task
+        setCachedTasks((prev) => prev.map(updateCounts))
+        setSelectedTask((prev) => prev ? updateCounts(prev) : prev)
+      }
     } catch (err) { console.error(err) }
   }
 
@@ -601,6 +668,18 @@ export default function DashboardPage() {
       setNewComment('')
     } catch (err) { console.error(err) }
     finally { setSubmittingComment(false) }
+  }
+
+  const handleUpdateComment = async (commentId: string, content: string) => {
+    if (!selectedTask) return
+    const updated = await taskApi.updateComment(selectedTask.id, commentId, content)
+    setComments((prev) => prev.map((comment) => comment.id === commentId ? updated : comment))
+  }
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!selectedTask) return
+    await taskApi.deleteComment(selectedTask.id, commentId)
+    setComments((prev) => prev.filter((comment) => comment.id !== commentId))
   }
 
   const filteredTasks = tasks.filter((task) => {
@@ -621,7 +700,6 @@ export default function DashboardPage() {
   const hiddenTaskCount = Math.max(filteredTasks.length - visibleTasks.length, 0)
   const displayedStats = getTaskOverviewStats(filteredTasks)
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
-  const showInitialEmptyRefresh = !initialRefreshComplete && filteredTasks.length === 0
 
   if (initError) {
     return (
@@ -659,7 +737,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex justify-between items-center">
           <span className="text-zinc-400 text-xs">Medium</span>
-          <span className="text-yellow-400 font-medium text-xs">{displayedStats.medium}</span>
+          <span className="text-[var(--priority-medium)] font-medium text-xs">{displayedStats.medium}</span>
         </div>
         <div className="flex justify-between items-center">
           <span className="text-zinc-400 text-xs">Low</span>
@@ -729,20 +807,29 @@ export default function DashboardPage() {
               )}
               <select
                 value={filter}
-                onChange={(e) => setFilter(e.target.value as any)}
+                onChange={(e) => {
+                  const nextFilter = e.target.value as TaskFilter
+                  setFilter(nextFilter)
+                  setTaskViewState({ filter: nextFilter })
+                }}
                 className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
                 style={{ width: 158, minWidth: 158 }}
               >
                 <option value="all">Status: All</option>
                 <option value="dueToday">Status: Today</option>
                 <option value="dueThisWeek">Status: Week</option>
+                <option value="dueNextWeek">Status: Next Week</option>
                 <option value="pastDue">Status: Past Due</option>
                 <option value="noDate">Status: No Date</option>
                 <option value="archived">Status: Done</option>
               </select>
               <select
                 value={sort}
-                onChange={(e) => setSort(e.target.value as any)}
+                onChange={(e) => {
+                  const nextSort = e.target.value as TaskSort
+                  setSort(nextSort)
+                  setTaskViewState({ sort: nextSort })
+                }}
                 className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
                 style={{ width: 164, minWidth: 164 }}
               >
@@ -752,7 +839,10 @@ export default function DashboardPage() {
               </select>
               <select
                 value={tagFilter}
-                onChange={(e) => setTagFilter(e.target.value)}
+                onChange={(e) => {
+                  setTagFilter(e.target.value)
+                  setTaskViewState({ tagFilter: e.target.value })
+                }}
                 className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
                 style={{ width: 164, minWidth: 164 }}
               >
@@ -763,7 +853,11 @@ export default function DashboardPage() {
               </select>
               <select
                 value={assigneeFilter}
-                onChange={(e) => setAssigneeFilter(e.target.value as AssigneeFilter)}
+                onChange={(e) => {
+                  const nextAssigneeFilter = e.target.value as AssigneeFilter
+                  setAssigneeFilter(nextAssigneeFilter)
+                  setTaskViewState({ assigneeFilter: nextAssigneeFilter })
+                }}
                 className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
                 style={{ width: 158, minWidth: 158 }}
               >
@@ -787,7 +881,7 @@ export default function DashboardPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
-          {loading || showInitialEmptyRefresh ? (
+          {loading ? (
             <div className="flex items-center justify-center py-20">
               <div className="spinner" />
             </div>
@@ -832,24 +926,26 @@ export default function DashboardPage() {
                           title="Mark complete"
                         />
                       )}
-                      <AssigneeBadge assignee={task.assignee} />
+                      <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
+                        <SubtaskIndicator task={task} />
+                        <AssigneeBadge assignee={task.assignee} />
+                      </div>
                     </div>
 
                     <div className="min-w-0 flex-1 space-y-2">
                       <span className={`block text-sm font-medium break-words ${isCompleted ? 'text-zinc-500 line-through' : 'text-[var(--text-primary)]'}`}>{task.title}</span>
                       <div className="flex items-center gap-2 flex-wrap">
-                        {projectFilter === 'all' && task.projectId ? (
-                          <span className="fc-project-pill text-xs leading-5 text-zinc-300">{projectNameById.get(task.projectId) || 'Project'}</span>
-                        ) : null}
-                        {isCompleted && <span className="badge badge-muted text-[10px]">Done</span>}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`badge ${priority.badge} text-[10px] shadow-sm`} style={{ background: priority.bgColor, color: priority.color, borderColor: `${priority.color}33` }}>
+                      <span className={`badge ${priority.badge} fc-task-priority-pill text-xs shadow-sm`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
                         <PriorityIcon className="w-3 h-3" />
                         {priority.label}
                       </span>
+                      {projectFilter === 'all' && task.projectId ? (
+                        <span className="fc-project-pill text-xs leading-5 text-zinc-300">{projectNameById.get(task.projectId) || 'Project'}</span>
+                      ) : null}
                       {task.dueDate && (
                         <span className={`text-[10px] flex items-center gap-1 ${getDueDateClass(task.dueDate)}`}>
                           <Clock className="w-3 h-3" />
@@ -883,50 +979,52 @@ export default function DashboardPage() {
                   <div
                     key={task.id}
                     onClick={() => openTaskPanel(task)}
-                    className={`card card-hover p-3 sm:p-4 flex items-start sm:items-center gap-3 cursor-pointer transition-opacity ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''}`}
+                    className={`card card-hover p-3 sm:p-4 cursor-pointer transition-opacity ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''}`}
                     style={{ borderLeft: `4px solid ${isCompleted ? 'rgba(113,113,122,0.75)' : priority.color}` }}
                   >
-                    {isCompleted ? (
-                      <div className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Check className="w-3 h-3 text-zinc-500" />
-                      </div>
-                    ) : (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id) }}
-                        className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 flex-shrink-0 mt-0.5 transition-colors"
-                        title="Mark complete"
-                      />
-                    )}
-                    <div className="flex-1 min-w-0 self-start">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-sm font-medium ${isCompleted ? 'text-zinc-500 line-through' : 'text-[var(--text-primary)]'}`}>{task.title}</span>
-                        {isCompleted && <span className="badge badge-muted text-[10px]">Done</span>}
-                        {projectFilter === 'all' && task.projectId ? (
-                          <span className="fc-project-pill hidden items-center gap-1.5 rounded-full border border-zinc-700/70 bg-zinc-800/70 px-2.5 py-1 text-[10px] font-medium text-zinc-300 whitespace-nowrap sm:inline-flex">{projectNameById.get(task.projectId) || 'Project'}</span>
-                        ) : null}
-                      </div>
-                      {projectFilter === 'all' && task.projectId ? (
-                        <span className="fc-project-pill mt-1 block text-xs leading-5 text-zinc-300 sm:hidden">{projectNameById.get(task.projectId) || 'Project'}</span>
-                      ) : null}
-                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                        <span className="sm:hidden"><AssigneeBadge assignee={task.assignee} /></span>
-                        <span className={`badge ${priority.badge} text-[10px] shadow-sm`} style={{ background: priority.bgColor, color: priority.color, borderColor: `${priority.color}33` }}>
-                          <PriorityIcon className="w-3 h-3" />
-                          {priority.label}
-                        </span>
-                        {task.dueDate && (
-                          <span className={`text-[10px] flex items-center gap-1 ${getDueDateClass(task.dueDate)}`}>
-                            <Clock className="w-3 h-3" />
-                            {formatDueDate(task.dueDate)}
+                    <div className="flex items-start gap-3">
+                      {isCompleted ? (
+                        <div className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <Check className="w-3 h-3 text-zinc-500" />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id) }}
+                          className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 flex-shrink-0 mt-0.5 transition-colors"
+                          title="Mark complete"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className={`block text-sm font-medium break-words ${isCompleted ? 'text-zinc-500 line-through' : 'text-[var(--text-primary)]'}`}>{task.title}</span>
+                          </div>
+                          <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
+                            <SubtaskIndicator task={task} />
+                            <AssigneeBadge assignee={task.assignee} />
+                            <ChevronRight className="hidden sm:block w-4 h-4 text-zinc-600 flex-shrink-0" />
+                          </div>
+                        </div>
+                        <div className="fc-task-meta-row mt-2">
+                          <span className={`badge ${priority.badge} fc-task-priority-pill text-xs shadow-sm`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
+                            <PriorityIcon className="w-3 h-3" />
+                            {priority.label}
                           </span>
-                        )}
-                        {task.recurring && (
-                          <span className="badge badge-recurring text-[10px]">Recurring</span>
-                        )}
+                          {projectFilter === 'all' && task.projectId ? (
+                            <span className="fc-project-pill text-xs leading-5 text-zinc-300">{projectNameById.get(task.projectId) || 'Project'}</span>
+                          ) : null}
+                          {task.dueDate && (
+                            <span className={`fc-due-pill text-[10px] ${getDueDateClass(task.dueDate)}`}>
+                              <Clock className="w-3 h-3" />
+                              {formatDueDate(task.dueDate)}
+                            </span>
+                          )}
+                          {task.recurring && (
+                            <span className="badge badge-recurring text-[10px]">Recurring</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="hidden sm:block"><AssigneeBadge assignee={task.assignee} /></div>
-                    <ChevronRight className="hidden sm:block w-4 h-4 text-zinc-600 flex-shrink-0" />
                   </div>
                 )
               })}
@@ -979,8 +1077,11 @@ export default function DashboardPage() {
           onDelete={requestDeleteTask}
           showDelete={true}
           onAddSubtask={handleAddSubtask}
+          onUpdateSubtask={handleUpdateSubtask}
           onDeleteSubtask={handleDeleteSubtask}
           onAddComment={handleAddComment}
+          onUpdateComment={handleUpdateComment}
+          onDeleteComment={handleDeleteComment}
           projectId={activeProject}
           projects={projects}
           icon="tasks"
@@ -1015,10 +1116,14 @@ export default function DashboardPage() {
                 <textarea
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
+                  maxLength={DESCRIPTION_MAX_LENGTH}
                   rows={2}
                   className="input resize-none"
                   placeholder="Add details..."
                 />
+                <div className={`mt-1 text-right text-[10px] leading-none ${newDescription.length > DESCRIPTION_MAX_LENGTH * 0.9 ? 'text-amber-300' : 'text-zinc-400'}`} aria-live="polite">
+                  {newDescription.length}/{DESCRIPTION_MAX_LENGTH}
+                </div>
               </div>
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Project</label>
@@ -1044,9 +1149,9 @@ export default function DashboardPage() {
                           key={p}
                           type="button"
                           onClick={() => setNewPriority(p)}
-                          className={`badge ${config.badge} w-full justify-center py-2 border transition-all ${isActive ? 'ring-1 ring-current' : 'opacity-80 hover:opacity-100'}`}
+                          className={`badge ${config.badge} w-full justify-center py-2 border transition-all ${isActive ? 'opacity-100' : 'opacity-80 hover:opacity-100'}`}
+                          style={isActive ? { background: config.color, borderColor: config.color, color: config.activeTextColor } : undefined}
                         >
-                          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: config.color }} />
                           {config.label}
                         </button>
                       )
@@ -1056,11 +1161,11 @@ export default function DashboardPage() {
                 <div className="fc-new-task-date-field">
                   <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Due Date</label>
                   <div className="fc-new-task-date-row">
-                    <input
-                      type="date"
+                    <DatePicker
                       value={newDueDate}
-                      onChange={(e) => setNewDueDate(e.target.value)}
-                      className="input fc-date-input fc-new-task-date-input min-w-0 flex-1 text-xs"
+                      onChange={setNewDueDate}
+                      className="min-w-0 flex-1"
+                      buttonClassName="fc-date-input fc-new-task-date-input"
                     />
                     {newDueDate ? (
                       <button

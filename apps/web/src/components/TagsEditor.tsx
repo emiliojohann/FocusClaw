@@ -8,7 +8,7 @@ const TAG_COLORS = [
   { bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.3)', text: '#3b82f6' },
   { bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.3)', text: '#a855f7' },
   { bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', text: '#f97316' },
-  { bg: 'rgba(234,179,8,0.15)', border: 'rgba(234,179,8,0.3)', text: '#eab308' },
+  { bg: 'var(--tag-yellow-bg)', border: 'var(--tag-yellow-border)', text: 'var(--tag-yellow)' },
 ]
 
 function colorForTagName(name: string): typeof TAG_COLORS[0] {

@@ -67,6 +67,13 @@ export const taskApi = {
       method: 'POST',
       body: JSON.stringify({ content }),
     }),
+  updateComment: (taskId: string, commentId: string, content: string) =>
+    request<any>(`/tasks/${taskId}/comments/${commentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
+  deleteComment: (taskId: string, commentId: string) =>
+    request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE', headers: {} }),
   get: (taskId: string) =>
     request<any>(`/tasks/${taskId}`),
   create: (data: {
@@ -121,6 +128,11 @@ export const taskApi = {
   addSubtask: (taskId: string, data: { title: string; description?: string; priority?: number }) =>
     request<any>(`/tasks/${taskId}/subtasks`, {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateSubtask: (subtaskId: string, data: Partial<{ title: string; description: string; priority: number; archived: boolean }>) =>
+    request<any>(`/tasks/subtasks/${subtaskId}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     }),
   // CSV Export
