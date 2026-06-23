@@ -31,6 +31,14 @@ export const ASSIGNEE_OPTIONS: Array<{
   { id: '', filter: 'unassigned', label: 'Unassigned', color: '#71717a', icon: Circle },
 ]
 
+export const RECURRING_OPTIONS = [
+  { value: '', label: 'Does not repeat' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'biweekly', label: 'Every 2 weeks' },
+  { value: 'monthly', label: 'Monthly' },
+]
+
 const USER_ASSIGNEES = new Set(['user', 'human', 'owner', 'operator', 'emilio'])
 const AGENT_ASSIGNEES = new Set(['agent', 'ai', 'assistant'])
 

@@ -117,11 +117,11 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-3">
-            <button onClick={prevMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
+            <button type="button" onClick={prevMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
               <ChevronLeft className="w-4 h-4 text-zinc-400" />
             </button>
             <span className="text-white text-xs font-semibold">{MONTHS[month]} {year}</span>
-            <button onClick={nextMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
+            <button type="button" onClick={nextMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
               <ChevronRight className="w-4 h-4 text-zinc-400" />
             </button>
           </div>
@@ -146,7 +146,8 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
               const isSelected = selected && date.getTime() === selected.getTime()
               return (
                 <button
-                  key={day}
+                  type="button"
+                  key={`${year}-${month}-${day}`}
                   onClick={() => selectDate(day)}
                   className={`
                     w-8 h-8 rounded-lg text-xs font-medium transition-all
@@ -166,6 +167,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
 
           {/* Today shortcut */}
           <button
+            type="button"
             onClick={() => {
               const t = new Date(); t.setHours(0,0,0,0)
               onChange(localDateKey(t))

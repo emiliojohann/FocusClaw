@@ -50,12 +50,13 @@ function readApiError(raw: string): string {
 
 // Tasks
 export const taskApi = {
-  list: (projectId: string, params?: { sort?: string; order?: string; filter?: string; includeArchived?: boolean }) => {
+  list: (projectId: string, params?: { sort?: string; order?: string; filter?: string; includeArchived?: boolean; search?: string }) => {
     const searchParams = new URLSearchParams()
     if (params?.sort) searchParams.set('sort', params.sort)
     if (params?.order) searchParams.set('order', params.order)
     if (params?.filter) searchParams.set('filter', params.filter)
     if (params?.includeArchived) searchParams.set('includeArchived', 'true')
+    if (params?.search?.trim()) searchParams.set('q', params.search.trim())
     const qs = searchParams.toString()
     return request<any[]>(`/tasks/project/${projectId}${qs ? `?${qs}` : ''}`)
   },
@@ -105,8 +106,8 @@ export const taskApi = {
     labels: string[]
     archived: boolean
     parentId: string
-    recurring: string
-    recurringEnd: string
+    recurring: string | null
+    recurringEnd: string | null
     dependsOn: string[]
   }>) =>
     request<any>(`/tasks/${taskId}`, {

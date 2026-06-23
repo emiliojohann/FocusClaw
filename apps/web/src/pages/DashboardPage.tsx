@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { taskApi, tagApi } from '@/lib/api'
 import {
   Check, Plus, X,
-  ChevronRight, AlertCircle, RefreshCw, Clock,
-  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree
+  ChevronRight, AlertCircle, RefreshCw, Clock, Repeat2,
+  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
@@ -19,6 +19,7 @@ import {
   serializeAssigneeForApi,
   assigneeMatchesFilter,
   PRIORITY_CONFIG,
+  RECURRING_OPTIONS,
   type AssigneeFilter,
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
@@ -157,6 +158,22 @@ function formatDueDate(dateStr: string | undefined): string {
   return due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+function formatRecurringLabel(recurring: string | undefined): string {
+  if (!recurring) return ''
+  const option = RECURRING_OPTIONS.find((item) => item.value === recurring)
+  return option ? `Repeats ${option.label.toLowerCase()}` : 'Repeats'
+}
+
+function RecurringIndicator({ recurring, className = '' }: { recurring?: string; className?: string }) {
+  if (!recurring) return null
+  const label = formatRecurringLabel(recurring)
+  return (
+    <span className={`fc-recurring-icon ${className}`.trim()} title={label} aria-label={label}>
+      <Repeat2 className="w-3.5 h-3.5" />
+    </span>
+  )
+}
+
 function compareTasks(a: Task, b: Task, sort: TaskSort): number {
   if (!!a.archived !== !!b.archived) return Number(a.archived) - Number(b.archived)
   if (sort === 'createdAt') {
@@ -168,6 +185,46 @@ function compareTasks(a: Task, b: Task, sort: TaskSort): number {
     return aDue - bDue
   }
   return (a.priority || 4) - (b.priority || 4)
+}
+
+function isTaskInProjectFilter(task: Task, projectFilter: string): boolean {
+  return projectFilter === 'all' || task.projectId === projectFilter
+}
+
+function isTaskInDateFilter(task: Task, filter: TaskFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'archived') return !!task.archived
+  if (task.archived) return false
+
+  const due = parseDueDateAsLocalDate(task.dueDate)
+  if (filter === 'noDate') return !due
+  if (!due) return false
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  const weekStart = new Date(today)
+  weekStart.setDate(today.getDate() - today.getDay())
+  weekStart.setHours(0, 0, 0, 0)
+
+  const nextWeekStart = new Date(weekStart)
+  nextWeekStart.setDate(weekStart.getDate() + 7)
+
+  const nextWeekEnd = new Date(nextWeekStart)
+  nextWeekEnd.setDate(nextWeekStart.getDate() + 7)
+
+  if (filter === 'pastDue') return due < today
+  if (filter === 'dueToday') return due >= today && due < tomorrow
+  if (filter === 'dueThisWeek') return due >= today && due < nextWeekStart
+  if (filter === 'dueNextWeek') return due >= nextWeekStart && due < nextWeekEnd
+  return true
+}
+
+function shouldKeepTaskInDashboard(task: Task, projectFilter: string, filter: TaskFilter): boolean {
+  return isTaskInProjectFilter(task, projectFilter) && isTaskInDateFilter(task, filter)
 }
 
 function AssigneeBadge({ assignee }: { assignee?: string }) {
@@ -218,6 +275,7 @@ export default function DashboardPage() {
   const [newDueDate, setNewDueDate] = useState('')
   const [newAssignee, setNewAssignee] = useState('')
   const [newProjectId, setNewProjectId] = useState('')
+  const [newRecurring, setNewRecurring] = useState('')
   const [creating, setCreating] = useState(false)
 
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
@@ -231,9 +289,14 @@ export default function DashboardPage() {
   const [allTags, setAllTags] = useState<TagRecord[]>(lastDashboardTags)
   const [tagFilter, setTagFilter] = useState<string>(taskViewState.tagFilter || 'all')
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>((taskViewState.assigneeFilter || 'all') as AssigneeFilter)
+  const [searchQuery, setSearchQuery] = useState(taskViewState.searchQuery || '')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState((taskViewState.searchQuery || '').trim())
   const [overviewPanelVisible, setOverviewPanelVisibleState] = useState(getOverviewPanelVisible)
   const [viewMode, setViewModeState] = useState<TaskViewMode>(getTaskViewMode)
   const [visibleTaskCount, setVisibleTaskCount] = useState(TASK_VISIBLE_INCREMENT)
+  const [mobileSearchExpanded, setMobileSearchExpanded] = useState(Boolean(taskViewState.searchQuery))
+  const desktopSearchInputRef = useRef<HTMLInputElement | null>(null)
+  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null)
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null)
@@ -249,6 +312,7 @@ export default function DashboardPage() {
   const [editDueDate, setEditDueDate] = useState('')
   const [editAssignee, setEditAssignee] = useState('')
   const [editProjectId, setEditProjectId] = useState('')
+  const [editRecurring, setEditRecurring] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [resetSpinning, setResetSpinning] = useState(false)
@@ -300,6 +364,23 @@ export default function DashboardPage() {
     })
   }
 
+  function updateTaskSearch(value: string) {
+    setSearchQuery(value)
+    setTaskViewState({ searchQuery: value })
+  }
+
+  function clearTaskSearch(collapseMobile = false) {
+    setSearchQuery('')
+    setDebouncedSearchQuery('')
+    setTaskViewState({ searchQuery: '' })
+    if (collapseMobile) setMobileSearchExpanded(false)
+  }
+
+  function openMobileTaskSearch() {
+    setMobileSearchExpanded(true)
+    window.requestAnimationFrame(() => mobileSearchInputRef.current?.focus())
+  }
+
   const handleReset = async () => {
     try {
       setResetSpinning(true)
@@ -310,14 +391,18 @@ export default function DashboardPage() {
       lastDashboardProjectFilter = 'all'
       setTagFilter('all')
       setAssigneeFilter('all')
+      setSearchQuery('')
+      setDebouncedSearchQuery('')
+      setMobileSearchExpanded(false)
       setTaskViewState({
         sort: defaults.sort,
         filter: defaults.filter,
         projectFilter: 'all',
         tagFilter: 'all',
         assigneeFilter: 'all',
+        searchQuery: '',
       })
-      await loadTasks({ sortOverride: defaults.sort, filterOverride: defaults.filter, projectFilterOverride: 'all' })
+      await loadTasks({ sortOverride: defaults.sort, filterOverride: defaults.filter, projectFilterOverride: 'all', searchOverride: '' })
     } finally {
       window.setTimeout(() => setResetSpinning(false), 450)
     }
@@ -329,12 +414,35 @@ export default function DashboardPage() {
     const projectIds = projectFilter === 'all'
       ? projects.map((project) => project.id)
       : [projectFilter]
-    const loadKey = dashboardLoadKey(projectFilter, sort, filter, projectIds)
+    const loadKey = dashboardLoadKey(projectFilter, sort, filter, projectIds, debouncedSearchQuery)
     if (lastDashboardLoadKey.current === loadKey) return
     void loadTasks()
-  }, [initialized, activeProject, projectFilter, sort, filter, projects])
+  }, [initialized, activeProject, projectFilter, sort, filter, debouncedSearchQuery, projects])
   useEffect(() => { if (initialized && activeProject && projects.length > 0) loadProjectTags() }, [initialized, activeProject, projectFilter, selectedTask, projects])
-  useEffect(() => { setVisibleTaskCount(TASK_VISIBLE_INCREMENT) }, [projectFilter, sort, filter, tagFilter, assigneeFilter])
+  useEffect(() => { setVisibleTaskCount(TASK_VISIBLE_INCREMENT) }, [projectFilter, sort, filter, tagFilter, assigneeFilter, debouncedSearchQuery])
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 200)
+    return () => window.clearTimeout(handle)
+  }, [searchQuery])
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isTypingTarget = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
+      if (event.key === '/' && !isTypingTarget) {
+        event.preventDefault()
+        desktopSearchInputRef.current?.focus()
+      } else if (
+        event.key === 'Escape' &&
+        searchQuery &&
+        (document.activeElement === desktopSearchInputRef.current || document.activeElement === mobileSearchInputRef.current)
+      ) {
+        event.preventDefault()
+        clearTaskSearch()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [searchQuery])
 
   const initWorkspace = async () => {
     try {
@@ -346,11 +454,12 @@ export default function DashboardPage() {
       const initialProjectIds = initialProjectFilter === 'all'
         ? context.projects.map((project) => project.id)
         : [initialProjectFilter]
+      const initialSearchQuery = (taskViewState.searchQuery || '').trim()
       const [initialTasks, initialTags] = await Promise.all([
-        fetchTasksForProjectIds(initialProjectIds, sort, filter),
+        fetchTasksForProjectIds(initialProjectIds, sort, filter, initialSearchQuery),
         tagApi.list(),
       ])
-      lastDashboardLoadKey.current = dashboardLoadKey(initialProjectFilter, sort, filter, initialProjectIds)
+      lastDashboardLoadKey.current = dashboardLoadKey(initialProjectFilter, sort, filter, initialProjectIds, initialSearchQuery)
       initialTags.sort((a: TagRecord, b: TagRecord) => a.name.localeCompare(b.name))
 
       setProjects(context.projects)
@@ -393,13 +502,14 @@ export default function DashboardPage() {
     }
   }
 
-  const fetchTasksForProjectIds = async (projectIds: string[], sortValue: TaskSort, filterValue: TaskFilter) => {
+  const fetchTasksForProjectIds = async (projectIds: string[], sortValue: TaskSort, filterValue: TaskFilter, searchValue: string) => {
     const sortOrder = sortValue === 'createdAt' ? 'desc' : 'asc'
     const results = await Promise.all(projectIds.map((projectId) => taskApi.list(projectId, {
         sort: sortValue,
         order: sortOrder,
         filter: filterValue,
         includeArchived: filterValue !== 'archived',
+        search: searchValue,
       })
     ))
     return results
@@ -408,28 +518,30 @@ export default function DashboardPage() {
       .sort((a: Task, b: Task) => compareTasks(a, b, sortValue))
   }
 
-  const dashboardLoadKey = (projectFilterValue: string, sortValue: TaskSort, filterValue: TaskFilter, projectIds: string[]) =>
+  const dashboardLoadKey = (projectFilterValue: string, sortValue: TaskSort, filterValue: TaskFilter, projectIds: string[], searchValue: string) =>
     JSON.stringify({
       projectFilter: projectFilterValue,
       sort: sortValue,
       filter: filterValue,
       projectIds: [...projectIds].sort(),
+      search: searchValue,
     })
 
-  const loadTasks = async (options?: { sortOverride?: TaskSort; filterOverride?: TaskFilter; projectFilterOverride?: string }) => {
+  const loadTasks = async (options?: { sortOverride?: TaskSort; filterOverride?: TaskFilter; projectFilterOverride?: string; searchOverride?: string }) => {
     if (!activeProject) return
     try {
       if (tasks.length === 0) setLoading(true)
       const sortValue = options?.sortOverride ?? sort
       const filterValue = options?.filterOverride ?? filter
       const projectFilterValue = options?.projectFilterOverride ?? projectFilter
+      const searchValue = options?.searchOverride ?? debouncedSearchQuery
       const projectIds = projectFilterValue === 'all'
         ? projects.map((project) => project.id)
         : [projectFilterValue]
       if (projectIds.length === 0) return
-      lastDashboardLoadKey.current = dashboardLoadKey(projectFilterValue, sortValue, filterValue, projectIds)
+      lastDashboardLoadKey.current = dashboardLoadKey(projectFilterValue, sortValue, filterValue, projectIds, searchValue)
 
-      const nextTasks = await fetchTasksForProjectIds(projectIds, sortValue, filterValue)
+      const nextTasks = await fetchTasksForProjectIds(projectIds, sortValue, filterValue, searchValue)
       setCachedTasks(nextTasks)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
@@ -464,8 +576,9 @@ export default function DashboardPage() {
     try {
       const task = await taskApi.create({
         projectId: targetProjectId, title: newTitle.trim(),
-        description: newDescription || undefined, priority: newPriority,
+        description: newDescription, priority: newPriority,
         dueDate: newDueDate || undefined, assignee: serializeAssigneeForApi(newAssignee),
+        recurring: newRecurring || undefined,
       })
       if (activeProject !== targetProjectId) {
         setActiveProject(targetProjectId)
@@ -479,7 +592,7 @@ export default function DashboardPage() {
       }
       setCachedTasks((prev) => [task, ...prev])
       setNewTitle(''); setNewDescription(''); setNewPriority(2)
-      setNewDueDate(''); setNewAssignee(''); setNewProjectId(''); setShowNewTaskForm(false)
+      setNewDueDate(''); setNewAssignee(''); setNewProjectId(''); setNewRecurring(''); setShowNewTaskForm(false)
       await loadTasks({ projectFilterOverride: projectFilter !== 'all' && projectFilter !== targetProjectId ? targetProjectId : undefined })
     } catch (err) { console.error(err) }
     finally { setCreating(false) }
@@ -561,6 +674,7 @@ export default function DashboardPage() {
     setEditDueDate(dueDateToLocalDateKey(task.dueDate))
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
+    setEditRecurring(task.recurring || '')
     setEditTags(task.labels ? JSON.parse(task.labels) : [])
     setPanelLoading(true); setSubtasks([]); setShowSubtaskForm(false)
     try {
@@ -572,6 +686,7 @@ export default function DashboardPage() {
       setEditDueDate(dueDateToLocalDateKey(taskData.dueDate))
       setEditAssignee(normalizeAssignee(taskData.assignee))
       setEditProjectId(taskData.projectId || activeProject)
+      setEditRecurring(taskData.recurring || '')
       setEditTags(taskData.labels ? JSON.parse(taskData.labels) : [])
       setComments(commentData.filter((c: CommentEntry) => c.action === 'comment'))
       setSubtasks(subtaskData)
@@ -584,20 +699,21 @@ export default function DashboardPage() {
     setSaving(true)
     try {
       const updated = await taskApi.update(selectedTask.id, {
-        title: editTitle, description: editDescription || undefined,
+        title: editTitle, description: editDescription,
         priority: editPriority, dueDate: editDueDate || null,
         assignee: serializeAssigneeForApi(editAssignee),
         projectId: editProjectId,
+        recurring: editRecurring || null,
         labels: editTags,
       })
-      if (updated.projectId !== activeProject) {
-        setCachedTasks((prev) => prev.filter((t) => t.id !== selectedTask.id))
-      } else {
-        setCachedTasks((prev) => prev.map((t) => t.id === selectedTask.id ? updated : t))
-      }
+      const keepUpdatedTask = shouldKeepTaskInDashboard(updated, projectFilter, filter)
+      setCachedTasks((prev) => (
+        keepUpdatedTask
+          ? prev.map((t) => t.id === selectedTask.id ? updated : t).sort((a, b) => compareTasks(a, b, sort))
+          : prev.filter((t) => t.id !== selectedTask.id)
+      ))
       setSelectedTask(updated)
       closeTaskPanel()
-      await loadTasks()
     } catch (err) { console.error('Failed to save task:', err) }
     finally { setSaving(false) }
   }
@@ -772,6 +888,31 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="fc-work-header-actions flex items-center justify-end gap-1.5 min-w-0 sm:gap-2">
+              {initialized ? (
+                <div className="relative hidden w-[190px] shrink-0 lg:block">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    ref={desktopSearchInputRef}
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => updateTaskSearch(e.target.value)}
+                    placeholder="Search tasks"
+                    className="input fc-control fc-search-input w-full text-xs"
+                    aria-label="Search tasks"
+                  />
+                  {searchQuery ? (
+                    <button
+                      type="button"
+                      onClick={() => clearTaskSearch()}
+                      className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-200"
+                      aria-label="Clear task search"
+                      title="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 onClick={openNewTaskForm}
                 disabled={!initialized}
@@ -791,10 +932,45 @@ export default function DashboardPage() {
                 />
               </button>
               {initialized ? (
+                mobileSearchExpanded || searchQuery ? (
+                  <div className="relative w-[190px] min-w-[190px] shrink-0 lg:hidden">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      ref={mobileSearchInputRef}
+                      type="search"
+                      value={searchQuery}
+                      onChange={(e) => updateTaskSearch(e.target.value)}
+                      placeholder="Search tasks"
+                      className="input fc-control fc-search-input w-full text-xs"
+                      aria-label="Search tasks"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => clearTaskSearch(true)}
+                      className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-200"
+                      aria-label="Close task search"
+                      title="Close search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openMobileTaskSearch}
+                    className="btn btn-secondary text-xs fc-control !w-9 !p-0 shrink-0 lg:hidden"
+                    aria-label="Search tasks"
+                    title="Search tasks"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                  </button>
+                )
+              ) : null}
+              {initialized ? (
                 <select
                   value={projectFilter}
                   onChange={(e) => handleProjectFilterChange(e.target.value)}
-                  className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                  className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-project shrink-0"
                   style={{ width: 162, minWidth: 162 }}
                 >
                   <option value="all">Project: All</option>
@@ -812,7 +988,7 @@ export default function DashboardPage() {
                   setFilter(nextFilter)
                   setTaskViewState({ filter: nextFilter })
                 }}
-                className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-status shrink-0"
                 style={{ width: 158, minWidth: 158 }}
               >
                 <option value="all">Status: All</option>
@@ -830,7 +1006,7 @@ export default function DashboardPage() {
                   setSort(nextSort)
                   setTaskViewState({ sort: nextSort })
                 }}
-                className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-sort shrink-0"
                 style={{ width: 164, minWidth: 164 }}
               >
                 <option value="priority">Sort: Priority</option>
@@ -843,7 +1019,7 @@ export default function DashboardPage() {
                   setTagFilter(e.target.value)
                   setTaskViewState({ tagFilter: e.target.value })
                 }}
-                className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-tag shrink-0"
                 style={{ width: 164, minWidth: 164 }}
               >
                 <option value="all">Tag: All</option>
@@ -858,7 +1034,7 @@ export default function DashboardPage() {
                   setAssigneeFilter(nextAssigneeFilter)
                   setTaskViewState({ assigneeFilter: nextAssigneeFilter })
                 }}
-                className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-owner shrink-0"
                 style={{ width: 158, minWidth: 158 }}
               >
                 <option value="all">Owner: All</option>
@@ -889,8 +1065,10 @@ export default function DashboardPage() {
             <div className="text-center py-20">
               <p className="text-[var(--text-secondary)] font-medium">No matching tasks</p>
               <p className="text-xs text-[var(--text-muted)] mt-1">
-                {tagFilter === 'all' && assigneeFilter === 'all'
-                  ? 'Create a task or switch filters'
+                {debouncedSearchQuery
+                  ? `No tasks found for "${debouncedSearchQuery}"`
+                  : tagFilter === 'all' && assigneeFilter === 'all'
+                    ? 'Create a task or switch filters'
                   : `No tasks found${tagFilter === 'all' ? '' : ` with tag "${selectedTagName || 'selected'}"`}`}
               </p>
               <button
@@ -928,6 +1106,7 @@ export default function DashboardPage() {
                       )}
                       <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
                         <SubtaskIndicator task={task} />
+                        <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-mobile" />
                         <AssigneeBadge assignee={task.assignee} />
                       </div>
                     </div>
@@ -952,9 +1131,7 @@ export default function DashboardPage() {
                           {formatDueDate(task.dueDate)}
                         </span>
                       )}
-                      {task.recurring && (
-                        <span className="badge badge-recurring text-[10px]">Recurring</span>
-                      )}
+                      <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-desktop" />
                     </div>
                   </div>
                 )
@@ -1001,6 +1178,7 @@ export default function DashboardPage() {
                           </div>
                           <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
                             <SubtaskIndicator task={task} />
+                            <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-mobile" />
                             <AssigneeBadge assignee={task.assignee} />
                             <ChevronRight className="hidden sm:block w-4 h-4 text-zinc-600 flex-shrink-0" />
                           </div>
@@ -1019,9 +1197,7 @@ export default function DashboardPage() {
                               {formatDueDate(task.dueDate)}
                             </span>
                           )}
-                          {task.recurring && (
-                            <span className="badge badge-recurring text-[10px]">Recurring</span>
-                          )}
+                          <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-desktop" />
                         </div>
                       </div>
                     </div>
@@ -1050,6 +1226,7 @@ export default function DashboardPage() {
           editDueDate={editDueDate}
           editAssignee={editAssignee}
           editProjectId={editProjectId}
+          editRecurring={editRecurring}
           editTags={editTags}
           saving={saving}
           comments={comments}
@@ -1066,6 +1243,7 @@ export default function DashboardPage() {
           setEditDueDate={setEditDueDate}
           setEditAssignee={setEditAssignee}
           setEditProjectId={setEditProjectId}
+          setEditRecurring={setEditRecurring}
           setEditTags={setEditTags}
           setNewComment={setNewComment}
           setShowSubtaskForm={setShowSubtaskForm}
@@ -1185,6 +1363,18 @@ export default function DashboardPage() {
                       <span className="fc-date-helper-mobile">Tap to select a date</span>
                     </p>
                   ) : null}
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Repeats</label>
+                  <select
+                    value={newRecurring}
+                    onChange={(e) => setNewRecurring(e.target.value)}
+                    className="input text-xs fc-control fc-select-control w-full"
+                  >
+                    {RECURRING_OPTIONS.map((option) => (
+                      <option key={option.value || 'none'} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div>

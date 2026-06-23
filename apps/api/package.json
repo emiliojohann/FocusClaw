@@ -1,6 +1,6 @@
 {
   "name": "@focusclaw/api",
-  "version": "2026.6.18",
+  "version": "2026.6.22",
   "private": true,
   "type": "module",
   "scripts": {

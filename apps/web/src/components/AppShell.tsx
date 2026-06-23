@@ -184,7 +184,7 @@ export function AppShell({
         </div>
       ) : null}
 
-      <header className="fc-mobile-topbar z-30 shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)]/95 px-3 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-2 backdrop-blur-xl lg:hidden">
+      <header className="fc-mobile-topbar z-30 shrink-0 bg-[var(--bg-secondary)]/95 px-3 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-2 backdrop-blur-xl lg:hidden">
         <div className="mx-auto flex h-11 w-full max-w-md items-center justify-between gap-3">
           <Link to="/" className="fc-mobile-brand mr-auto flex min-w-0 items-center gap-2 rounded-lg pr-2 text-sm font-extrabold text-white">
             <img src="/fc-logo-app.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="h-7 w-7 flex-shrink-0 rounded-lg" />
@@ -204,7 +204,7 @@ export function AppShell({
 
       <main className={mainClassName}>{children}</main>
 
-      <nav className="fc-mobile-nav z-30 shrink-0 border-t border-[var(--border)] bg-[var(--bg-secondary)]/95 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden">
+      <nav className="fc-mobile-nav z-30 shrink-0 bg-[var(--bg-secondary)]/95 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden">
         <div className="mx-auto grid max-w-md grid-cols-3 gap-1">
           {navItems.map((item) => {
             const Icon = item.icon

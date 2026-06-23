@@ -26,6 +26,7 @@ import {
   normalizeAssignee,
   serializeAssigneeForApi,
   assigneeMatchesFilter,
+  RECURRING_OPTIONS,
   type AssigneeFilter,
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
@@ -269,6 +270,12 @@ function compareAgendaTasks(a: Task, b: Task): number {
   return aCreated - bCreated
 }
 
+function shouldKeepTaskInCalendar(task: Task, projectFilter: string, showCompleted: boolean): boolean {
+  if (!task.dueDate) return false
+  if (!showCompleted && task.archived) return false
+  return projectFilter === 'all' || task.projectId === projectFilter
+}
+
 export default function CalendarPage() {
   const calendarDefaults = getCalendarViewDefaults()
   const calendarViewState = getCalendarViewState()
@@ -298,6 +305,7 @@ export default function CalendarPage() {
   const [newDueDate, setNewDueDate] = useState('')
   const [newAssignee, setNewAssignee] = useState('')
   const [newProjectId, setNewProjectId] = useState('')
+  const [newRecurring, setNewRecurring] = useState('')
   const [creating, setCreating] = useState(false)
 
   const [resetSpinning, setResetSpinning] = useState(false)
@@ -348,6 +356,7 @@ export default function CalendarPage() {
   const [editDueDate, setEditDueDate] = useState('')
   const [editAssignee, setEditAssignee] = useState('')
   const [editProjectId, setEditProjectId] = useState('')
+  const [editRecurring, setEditRecurring] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -453,10 +462,11 @@ export default function CalendarPage() {
       const task = await taskApi.create({
         projectId: targetProjectId,
         title: newTitle.trim(),
-        description: newDescription || undefined,
+        description: newDescription,
         priority: newPriority,
         dueDate: newDueDate || undefined,
         assignee: serializeAssigneeForApi(newAssignee),
+        recurring: newRecurring || undefined,
       })
       if (activeProject !== targetProjectId) {
         setActiveProject(targetProjectId)
@@ -477,6 +487,7 @@ export default function CalendarPage() {
       setNewDueDate('')
       setNewAssignee('')
       setNewProjectId('')
+      setNewRecurring('')
       setShowNewTaskForm(false)
       await loadTasks({ projectFilterOverride: projectFilter !== 'all' && projectFilter !== targetProjectId ? targetProjectId : undefined })
     } catch (err) {
@@ -656,6 +667,7 @@ export default function CalendarPage() {
     setEditDueDate(dueDateToLocalDateKey(task.dueDate))
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
+    setEditRecurring(task.recurring || '')
     setPanelLoading(true); setSubtasks([]); setComments([]); setShowSubtaskForm(false)
     try {
       const [taskData, commentData, subtaskData] = await Promise.all([
@@ -668,6 +680,7 @@ export default function CalendarPage() {
       setEditDueDate(dueDateToLocalDateKey(taskData.dueDate))
       setEditAssignee(normalizeAssignee(taskData.assignee))
       setEditProjectId(taskData.projectId || activeProject)
+      setEditRecurring(taskData.recurring || '')
       setEditTags(taskData.labels ? JSON.parse(taskData.labels) : [])
       setComments(commentData.filter((c: CommentEntry) => c.action === 'comment'))
       setSubtasks(subtaskData)
@@ -682,20 +695,23 @@ export default function CalendarPage() {
     setSaving(true)
     try {
       const updated = await taskApi.update(selectedTask.id, {
-        title: editTitle, description: editDescription || undefined,
+        title: editTitle, description: editDescription,
         priority: editPriority, dueDate: editDueDate || null,
         assignee: serializeAssigneeForApi(editAssignee),
         projectId: editProjectId,
+        recurring: editRecurring || null,
         labels: editTags,
       })
-      if (projectFilter !== 'all' && updated.projectId !== projectFilter) {
-        setCachedTasks((prev) => prev.filter((t) => t.id !== selectedTask.id))
-      } else {
-        setCachedTasks((prev) => prev.map((t) => t.id === selectedTask.id ? updated : t))
-      }
+      const keepUpdatedTask = shouldKeepTaskInCalendar(updated, projectFilter, showCompleted)
+      setCachedTasks((prev) => (
+        keepUpdatedTask
+          ? prev.map((t) => t.id === selectedTask.id ? updated : t)
+          : prev.filter((t) => t.id !== selectedTask.id)
+      ))
+      setOverviewTasks((prev) => prev.map((t) => t.id === selectedTask.id ? updated : t))
+      lastCalendarOverviewTasks = lastCalendarOverviewTasks.map((t) => t.id === selectedTask.id ? updated : t)
       setSelectedTask(updated)
       closeTaskPanel()
-      await loadTasks()
     } catch (err) { console.error('Failed to save task:', err) }
     finally { setSaving(false) }
   }
@@ -906,7 +922,7 @@ export default function CalendarPage() {
                 <select
                   value={projectFilter}
                   onChange={(e) => handleProjectFilterChange(e.target.value)}
-                  className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                  className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-project shrink-0"
                   style={{ width: 162, minWidth: 162 }}
                 >
                   <option value="all">Project: All</option>
@@ -924,7 +940,7 @@ export default function CalendarPage() {
                   setAssigneeFilter(nextAssigneeFilter)
                   setCalendarViewState({ assigneeFilter: nextAssigneeFilter })
                 }}
-                className="input text-xs fc-control fc-select-control fc-filter-select shrink-0"
+                className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-owner shrink-0"
                 style={{ width: 158, minWidth: 158 }}
               >
                 <option value="all">Owner: All</option>
@@ -1093,6 +1109,7 @@ export default function CalendarPage() {
           editDueDate={editDueDate}
           editAssignee={editAssignee}
           editProjectId={editProjectId}
+          editRecurring={editRecurring}
           editTags={editTags}
           saving={saving}
           comments={comments}
@@ -1109,6 +1126,7 @@ export default function CalendarPage() {
           setEditDueDate={setEditDueDate}
           setEditAssignee={setEditAssignee}
           setEditProjectId={setEditProjectId}
+          setEditRecurring={setEditRecurring}
           setEditTags={setEditTags}
           setNewComment={setNewComment}
           setShowSubtaskForm={setShowSubtaskForm}
@@ -1227,6 +1245,18 @@ export default function CalendarPage() {
                       <span className="fc-date-helper-mobile">Tap to select a date</span>
                     </p>
                   ) : null}
+                </div>
+                <div>
+                  <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Repeats</label>
+                  <select
+                    value={newRecurring}
+                    onChange={(e) => setNewRecurring(e.target.value)}
+                    className="input text-xs fc-control fc-select-control w-full"
+                  >
+                    {RECURRING_OPTIONS.map((option) => (
+                      <option key={option.value || 'none'} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div>

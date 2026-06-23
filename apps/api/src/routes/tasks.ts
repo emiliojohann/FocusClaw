@@ -1,12 +1,20 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { db } from '../db'
 import { tasks, statusDefinitions, activityLog, projects, workspaces } from '../db/schema'
-import { eq, asc, desc, and, isNull } from 'drizzle-orm'
+import { eq, asc, desc, and, isNull, inArray } from 'drizzle-orm'
 import { hydrateTaskWithTags, hydrateTasksWithTags, replaceTaskTags } from '../lib/taskTags'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COMMENT_MAX_LENGTH = 1000
 const DESCRIPTION_MAX_LENGTH = 5000
+
+type SearchableTask = {
+  id: string
+  parentId: string | null
+  title: string
+  description: string | null
+  tags?: Array<{ name: string }>
+}
 
 function isValidUUID(s: string): boolean {
   return UUID_REGEX.test(s)
@@ -82,6 +90,32 @@ function readActivityChanges(raw: string | null): Record<string, unknown> {
   } catch {
     return {}
   }
+}
+
+function textMatchesSearch(value: unknown, query: string): boolean {
+  return typeof value === 'string' && value.toLowerCase().includes(query)
+}
+
+function taskMatchesSearch(
+  task: SearchableTask,
+  query: string,
+  projectName: string,
+  commentsByTaskId: Map<string, string[]>,
+  subtasksByParentId: Map<string, SearchableTask[]>,
+): boolean {
+  if (textMatchesSearch(task.title, query)) return true
+  if (textMatchesSearch(task.description, query)) return true
+  if (textMatchesSearch(projectName, query)) return true
+  if (task.tags?.some((tag) => textMatchesSearch(tag.name, query))) return true
+  if (commentsByTaskId.get(task.id)?.some((content) => textMatchesSearch(content, query))) return true
+
+  const subtasks = subtasksByParentId.get(task.id) || []
+  return subtasks.some((subtask) =>
+    textMatchesSearch(subtask.title, query) ||
+    textMatchesSearch(subtask.description, query) ||
+    subtask.tags?.some((tag) => textMatchesSearch(tag.name, query)) ||
+    commentsByTaskId.get(subtask.id)?.some((content) => textMatchesSearch(content, query)),
+  )
 }
 
 // ─────────────────────────────────────────────
@@ -162,24 +196,6 @@ function detectPriorityFromText(input: string): number {
   return 2 // default high
 }
 
-// Detect recurring patterns
-function detectRecurring(input: string): string | null {
-  const lower = input.toLowerCase()
-  if (/\bdaily\b/.test(lower)) return 'daily'
-  if (/\bweekly\b/.test(lower)) return 'weekly'
-  if (/\bmonthly\b/.test(lower)) return 'monthly'
-  if (/\bbiweekly\b/.test(lower)) return 'biweekly'
-  if (/\bevery\s+(\d+)\s+days?\b/.test(lower)) {
-    const m = lower.match(/\bevery\s+(\d+)\s+days?\b/)
-    return m ? `every ${m[1]} days` : null
-  }
-  const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
-  for (const day of dayNames) {
-    if (new RegExp(`\\b${day}\\b`).test(lower)) return `every ${day}`
-  }
-  return null
-}
-
 export async function taskRoutes(fastify: FastifyInstance) {
   // Create task — with natural language support
   fastify.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -222,7 +238,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const combinedText = `${title} ${description || ''}`
     const { dueDate: nlDueDate, reasoning: dateReasoning } = parseNaturalDate(combinedText)
     const nlPriority = priority ?? detectPriorityFromText(combinedText)
-    const nlRecurring = recurring ?? detectRecurring(combinedText)
+    const explicitRecurring = recurring?.trim() || null
 
     // Use NL-parsed date if no explicit dueDate provided
     const finalDueDate = dueDate
@@ -232,7 +248,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const aiReasoning = [
       dateReasoning,
       nlPriority !== 2 ? `Priority detected: ${nlPriority}` : '',
-      nlRecurring ? `Recurring detected: ${nlRecurring}` : '',
+      explicitRecurring ? `Recurring selected: ${explicitRecurring}` : '',
     ].filter(Boolean).join('; ')
 
     // ── Position (for root tasks, or subtasks) ─────────────────────────────
@@ -268,7 +284,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       labels: '[]',
       position,
       parentId: parentId ?? null,
-      recurring: nlRecurring ?? null,
+      recurring: explicitRecurring,
       recurringEnd: recurringEnd ? new Date(recurringEnd) : null,
       dependsOn: dependsOnJson,
       dueDateNatural: nlDueDate ? combinedText.match(/\b(next\s+\w+|today|tomorrow|\w+)\b/i)?.[0] ?? null : null,
@@ -296,11 +312,12 @@ export async function taskRoutes(fastify: FastifyInstance) {
   // List tasks by project
   fastify.get('/project/:projectId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { projectId } = request.params as { projectId: string }
-    const { sort, order, filter, includeArchived } = request.query as {
+    const { sort, order, filter, includeArchived, q } = request.query as {
       sort?: 'priority' | 'dueDate' | 'createdAt'
       order?: 'asc' | 'desc'
       filter?: 'all' | 'dueToday' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
       includeArchived?: string
+      q?: string
     }
 
     // Validate UUID format before querying
@@ -322,6 +339,8 @@ export async function taskRoutes(fastify: FastifyInstance) {
       .where(eq(tasks.projectId, projectId))
       .orderBy(asc(tasks.archived), sortDirection)
     let result = allProjectTasks
+    const hydratedProjectTasks = hydrateTasksWithTags(allProjectTasks)
+    const hydratedTaskById = new Map(hydratedProjectTasks.map((task) => [task.id, task]))
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -368,6 +387,35 @@ export async function taskRoutes(fastify: FastifyInstance) {
       result = result.filter(t => !t.archived)
     }
 
+    const searchQuery = q?.trim().toLowerCase()
+    if (searchQuery) {
+      const projectTaskIds = allProjectTasks.map((task) => task.id)
+      const commentRows = projectTaskIds.length > 0
+        ? await db.select().from(activityLog).where(and(inArray(activityLog.taskId, projectTaskIds), eq(activityLog.action, 'comment')))
+        : []
+      const commentsByTaskId = new Map<string, string[]>()
+      for (const row of commentRows) {
+        const content = readActivityChanges(row.changes).content
+        if (typeof content !== 'string') continue
+        const current = commentsByTaskId.get(row.taskId) || []
+        current.push(content)
+        commentsByTaskId.set(row.taskId, current)
+      }
+
+      const subtasksByParentId = new Map<string, SearchableTask[]>()
+      for (const task of hydratedProjectTasks) {
+        if (!task.parentId) continue
+        const current = subtasksByParentId.get(task.parentId) || []
+        current.push(task)
+        subtasksByParentId.set(task.parentId, current)
+      }
+
+      result = result.filter((task) => {
+        const hydratedTask = hydratedTaskById.get(task.id)
+        return hydratedTask ? taskMatchesSearch(hydratedTask, searchQuery, projectExists[0].name, commentsByTaskId, subtasksByParentId) : false
+      })
+    }
+
     const hydrated = addSubtaskCounts(hydrateTasksWithTags(result), allProjectTasks)
     return reply.send(hydrated)
   })
@@ -399,6 +447,8 @@ export async function taskRoutes(fastify: FastifyInstance) {
       archived: boolean
       position: number
       projectId: string
+      recurring: string | null
+      recurringEnd: string | null
     }>
     const existingTask = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
     if (existingTask.length === 0) {
@@ -419,6 +469,12 @@ export async function taskRoutes(fastify: FastifyInstance) {
     }
     if (updates.assignee !== undefined) {
       setObj.assignee = updates.assignee?.trim() || null
+    }
+    if (updates.recurring !== undefined) {
+      setObj.recurring = updates.recurring?.trim() || null
+    }
+    if (updates.recurringEnd !== undefined) {
+      setObj.recurringEnd = updates.recurringEnd ? new Date(updates.recurringEnd) : null
     }
     setObj.updatedAt = new Date()
 

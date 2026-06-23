@@ -436,6 +436,33 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   white-space: nowrap;
 }
 
+.fc-recurring-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 1.25rem;
+  border-radius: 9999px;
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.fc-recurring-icon-desktop {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .fc-recurring-icon-mobile {
+    display: none;
+  }
+
+  .fc-recurring-icon-desktop {
+    display: inline-flex;
+  }
+}
+
 :root[data-theme='light'] .fc-project-pill {
   border-color: #aeb4bf !important;
   background-color: #b8bec8 !important;
@@ -470,6 +497,25 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   background-repeat: no-repeat;
   background-position: right 0.875rem center;
   background-size: 1rem;
+}
+
+.fc-search-input {
+  padding-left: 2.25rem !important;
+  padding-right: 2rem !important;
+}
+
+.fc-search-input::-webkit-search-cancel-button,
+.fc-search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.fc-search-input::-ms-clear,
+.fc-search-input::-ms-reveal {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .fc-modal-surface {
@@ -566,7 +612,10 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 
   .fc-app-shell > main {
     min-height: 0;
-    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
+
+  .fc-app-shell > main > .flex-1.overflow-auto {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom)) !important;
   }
 
   .fc-mobile-nav {
@@ -583,8 +632,25 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   }
 
   .fc-filter-select {
-    width: clamp(12rem, 68vw, 19rem) !important;
-    min-width: clamp(12rem, 68vw, 19rem) !important;
+    width: clamp(7.5rem, 34vw, 9.25rem) !important;
+    min-width: clamp(7.5rem, 34vw, 9.25rem) !important;
+  }
+
+  .fc-filter-select-project {
+    width: clamp(8.25rem, 38vw, 10rem) !important;
+    min-width: clamp(8.25rem, 38vw, 10rem) !important;
+  }
+
+  .fc-filter-select-status,
+  .fc-filter-select-owner {
+    width: clamp(8rem, 36vw, 9.5rem) !important;
+    min-width: clamp(8rem, 36vw, 9.5rem) !important;
+  }
+
+  .fc-filter-select-sort,
+  .fc-filter-select-tag {
+    width: clamp(7.25rem, 32vw, 8.75rem) !important;
+    min-width: clamp(7.25rem, 32vw, 8.75rem) !important;
   }
 }
 
@@ -608,16 +674,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   }
 
   .fc-mobile-nav {
-    position: fixed !important;
-    right: 0 !important;
-    bottom: calc(-1 * var(--fc-visual-viewport-bottom-gap, 0px)) !important;
-    left: 0 !important;
+    position: static !important;
     padding-top: 0.25rem !important;
     padding-bottom: 0.25rem !important;
   }
 
   .fc-app-shell > main {
-    padding-bottom: 3rem !important;
+    padding-bottom: 0 !important;
+  }
+
+  .fc-app-shell > main > .flex-1.overflow-auto {
+    padding-bottom: 0.75rem !important;
   }
 
   .fc-mobile-topbar {

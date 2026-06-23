@@ -6,7 +6,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import Database, { Database as BetterSqliteDatabase } from 'better-sqlite3'
 import { sqlite } from '../db'
 
-const APP_VERSION = 'v2026.6.18'
+const APP_VERSION = 'v2026.6.22'
 const SCHEMA_VERSION = 'sqlite-v1'
 const FORMAT_VERSION = 1
 const BACKUP_DIR = resolve(homedir(), '.focusclaw', 'backups')

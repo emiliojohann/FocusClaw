@@ -11,6 +11,7 @@ export interface TaskViewState extends TaskViewDefaults {
   projectFilter: string
   tagFilter: string
   assigneeFilter: string
+  searchQuery: string
 }
 
 export interface CalendarViewDefaults {
@@ -43,6 +44,7 @@ export const TASK_VIEW_STATE_DEFAULTS: TaskViewState = {
   projectFilter: 'all',
   tagFilter: 'all',
   assigneeFilter: 'all',
+  searchQuery: '',
 }
 
 export const CALENDAR_VIEW_STATE_DEFAULTS: CalendarViewState = {
@@ -91,6 +93,7 @@ export function getTaskViewState(): TaskViewState {
       projectFilter: parsed.projectFilter || 'all',
       tagFilter: parsed.tagFilter || 'all',
       assigneeFilter: parsed.assigneeFilter || 'all',
+      searchQuery: parsed.searchQuery || '',
     }
   } catch {
     return { ...TASK_VIEW_STATE_DEFAULTS, ...defaults }

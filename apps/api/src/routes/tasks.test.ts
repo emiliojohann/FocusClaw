@@ -385,3 +385,149 @@ test('project task list includes subtask completion counts', async () => {
     await server.close()
   }
 })
+
+test('project task search matches comments and subtasks', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Search Workspace', slug: `search-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const projectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Search Project' },
+    })
+    assert.equal(projectResponse.statusCode, 201)
+    const project = projectResponse.json()
+
+    const parentResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: project.id, title: 'Parent task' },
+    })
+    assert.equal(parentResponse.statusCode, 201)
+    const parent = parentResponse.json()
+
+    const otherResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: project.id, title: 'Unrelated task' },
+    })
+    assert.equal(otherResponse.statusCode, 201)
+
+    const subtaskResponse = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${parent.id}/subtasks`,
+      payload: { title: 'Passport renewal checklist' },
+    })
+    assert.equal(subtaskResponse.statusCode, 201)
+    const subtask = subtaskResponse.json()
+
+    const commentResponse = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${parent.id}/comments`,
+      payload: { content: 'UCSD insurance note' },
+    })
+    assert.equal(commentResponse.statusCode, 201)
+
+    const commentSearch = await server.inject({
+      method: 'GET',
+      url: `/api/tasks/project/${project.id}?q=ucsd`,
+    })
+    assert.equal(commentSearch.statusCode, 200)
+    assert.deepEqual(commentSearch.json().map((row: any) => row.id), [parent.id])
+
+    const subtaskSearch = await server.inject({
+      method: 'GET',
+      url: `/api/tasks/project/${project.id}?q=passport`,
+    })
+    assert.equal(subtaskSearch.statusCode, 200)
+    assert.deepEqual(subtaskSearch.json().map((row: any) => row.id), [parent.id, subtask.id])
+    assert.equal(subtaskSearch.json().some((row: any) => row.title === 'Unrelated task'), false)
+  } finally {
+    await server.close()
+  }
+})
+
+test('weekday due text does not automatically create recurring tasks', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Recurring Workspace', slug: `recurring-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const projectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Inbox' },
+    })
+    assert.equal(projectResponse.statusCode, 201)
+    const project = projectResponse.json()
+
+    const taskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        projectId: project.id,
+        title: 'Fix all bugs',
+        description: 'Make sure this is done by Friday!',
+      },
+    })
+    assert.equal(taskResponse.statusCode, 201)
+    assert.equal(taskResponse.json().recurring, null)
+  } finally {
+    await server.close()
+  }
+})
+
+test('explicit recurring option creates recurring tasks', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Explicit Recurring Workspace', slug: `explicit-recurring-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const projectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Inbox' },
+    })
+    assert.equal(projectResponse.statusCode, 201)
+    const project = projectResponse.json()
+
+    const taskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        projectId: project.id,
+        title: 'Review weekly metrics',
+        recurring: 'weekly',
+      },
+    })
+    assert.equal(taskResponse.statusCode, 201)
+    assert.equal(taskResponse.json().recurring, 'weekly')
+
+    const clearResponse = await server.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskResponse.json().id}`,
+      payload: { recurring: null },
+    })
+    assert.equal(clearResponse.statusCode, 200)
+    assert.equal(clearResponse.json().recurring, null)
+  } finally {
+    await server.close()
+  }
+})

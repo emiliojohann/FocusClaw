@@ -8,6 +8,7 @@ import { TagsEditor } from './TagsEditor'
 import {
   ASSIGNEE_OPTIONS,
   normalizeAssignee,
+  RECURRING_OPTIONS,
 } from '@/lib/shared'
 import { dueDateToLocalDateKey } from '@/lib/dates'
 import { useEffect, useState, type ReactNode } from 'react'
@@ -52,6 +53,7 @@ interface TaskPanelProps {
   editDueDate: string
   editAssignee: string
   editProjectId: string
+  editRecurring: string
   editTags: string[]
   saving: boolean
   
@@ -72,6 +74,7 @@ interface TaskPanelProps {
   setEditDueDate: (v: string) => void
   setEditAssignee: (v: string) => void
   setEditProjectId: (v: string) => void
+  setEditRecurring: (v: string) => void
   setEditTags: (v: string[]) => void
   setNewComment: (v: string) => void
   setShowSubtaskForm: (v: boolean) => void
@@ -167,6 +170,7 @@ export function TaskPanel({
   editDueDate,
   editAssignee,
   editProjectId,
+  editRecurring,
   editTags,
   saving,
   comments,
@@ -183,6 +187,7 @@ export function TaskPanel({
   setEditDueDate,
   setEditAssignee,
   setEditProjectId,
+  setEditRecurring,
   setEditTags,
   setNewComment,
   setShowSubtaskForm,
@@ -223,6 +228,7 @@ export function TaskPanel({
     editDueDate !== selectedDueDate ||
     normalizeAssignee(editAssignee) !== normalizeAssignee(selectedTask.assignee) ||
     editProjectId !== (selectedTask.projectId || projectId) ||
+    editRecurring !== (selectedTask.recurring || '') ||
     JSON.stringify(editTags) !== JSON.stringify(selectedLabels)
   )
 
@@ -451,6 +457,18 @@ export function TaskPanel({
                       <span className="fc-date-helper-mobile">Tap to select a date</span>
                     </p>
                   ) : null}
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Repeats</label>
+                  <select
+                    value={editRecurring}
+                    onChange={(e) => setEditRecurring(e.target.value)}
+                    className="input text-xs fc-control fc-select-control w-full"
+                  >
+                    {RECURRING_OPTIONS.map((option) => (
+                      <option key={option.value || 'none'} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

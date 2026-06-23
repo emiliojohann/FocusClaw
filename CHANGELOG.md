@@ -1,5 +1,17 @@
 # Changelog
 
+## v2026.6.22 - 2026-06-22
+
+- Hid native browser search clear controls so FocusClaw shows only its custom search close button.
+- Fixed Task Details description saves so edited descriptions persist and empty descriptions can be cleared.
+- Reduced task-list flicker after Task Details saves by updating the changed task locally instead of forcing a full reload.
+- Removed automatic natural-language recurring-task detection from the API.
+- Added explicit Repeats controls for new tasks and Task Details: does not repeat, daily, weekly, every 2 weeks, and monthly.
+- Added API coverage for explicit recurring values and for avoiding accidental recurrence from plain weekday text like "by Friday".
+- Replaced task-card recurring text pills with compact repeat-icon indicators in grid and list views.
+- Adjusted mobile task-card recurring indicators so the repeat icon sits next to the User/Agent pill instead of wrapping the metadata row.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.6.22` / `v2026.6.22`.
+
 ## v2026.6.18 - 2026-06-18
 
 - Includes all FocusClaw changes since `v2026.6.16`.
