@@ -36,7 +36,7 @@ test('request helper sends saved x-api-key header', async () => {
   assert.equal((headers as Record<string, string>)['x-api-key'], 'header-key')
 })
 
-test('new task project falls back to active project', () => {
-  assert.equal(resolveTaskProjectId('', 'active-project'), 'active-project')
-  assert.equal(resolveTaskProjectId('selected-project', 'active-project'), 'selected-project')
+test('new task project requires an explicit project selection', () => {
+  assert.equal(resolveTaskProjectId(''), '')
+  assert.equal(resolveTaskProjectId('selected-project'), 'selected-project')
 })

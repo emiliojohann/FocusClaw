@@ -1,6 +1,6 @@
 # Hermes Integration
 
-FocusClaw can be used by Hermes through the local REST API. Hermes does not need the OpenClaw plugin to work with FocusClaw, and should prefer API calls over browser automation.
+FocusClaw gives Hermes the same local task source of truth that OpenClaw uses. Hermes connects through the local REST API, does not need the OpenClaw plugin, and should prefer API calls over browser automation.
 
 Use this document as the Hermes-specific bridge. For endpoint details, request/response shape, and curl examples, see [Agent Automation API](./agent-automation-api.md).
 
@@ -52,11 +52,25 @@ x-api-key: <FOCUSCLAW_API_KEY>
 
 ## Common Workflows
 
+### List workspace projects
+
+```bash
+curl "$FOCUSCLAW_API/projects?workspaceId=WORKSPACE_ID"
+```
+
+### List all workspace tasks
+
+```bash
+curl "$FOCUSCLAW_API/tasks?workspaceId=WORKSPACE_ID"
+```
+
 ### List tasks for a project
 
 ```bash
-curl "$FOCUSCLAW_API/tasks/project/PROJECT_ID"
+curl "$FOCUSCLAW_API/tasks?projectId=PROJECT_ID"
 ```
+
+The older project-scoped route remains available as `GET /tasks/project/:projectId`, but Hermes skills should prefer the query-based JSON routes above because they are easier to discover and match the route names users expect.
 
 ### Create a task
 
@@ -73,6 +87,16 @@ curl -X PATCH "$FOCUSCLAW_API/tasks/TASK_ID" \
   -H "Content-Type: application/json" \
   -d '{"priority":1,"assignee":"user"}'
 ```
+
+### Add an attachment reference
+
+```bash
+curl -X POST "$FOCUSCLAW_API/tasks/TASK_ID/attachments" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Generated draft","kind":"file","uri":"/tmp/focusclaw-fixtures/draft.md"}'
+```
+
+Attachment references are task-manager metadata for local files or folders. Hermes should not assume FocusClaw copied, uploaded, hosted, or owns the underlying file. URL attachments are rejected.
 
 ### Complete a task
 

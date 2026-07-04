@@ -1,8 +1,8 @@
 # Agent Automation API
 
-FocusClaw includes a local Agent Automation API so trusted agents and scripts can work with the same projects and tasks as the web app without controlling the browser UI.
+FocusClaw includes a local Agent Automation API so OpenClaw, Hermes, trusted agents, and scripts can work with the same projects and tasks as the web app without controlling the browser UI.
 
-Use this API for agent workflows such as task capture, daily planning, progress updates, and handoffs between humans and agents. Agents should prefer this API over browser automation because the API is a stable structured interface.
+Use this API for agent workflows such as task capture, daily planning, progress updates, and handoffs between humans and agents. OpenClaw should prefer its plugin tools when available; Hermes and other integrations should prefer this API over browser automation because the API is a stable structured interface.
 
 ## Local API
 
@@ -22,9 +22,11 @@ The API runs on the user's computer next to the FocusClaw web app and local SQLi
 
 ## Authentication
 
-Authentication is optional for local development.
+Authentication is optional for loopback-only local development.
 
-If the API server is started without `API_KEY`, auth is disabled and agents do not need to send an API key.
+If the API server is started without `API_KEY` and `API_HOST` is loopback (`127.0.0.1`, `localhost`, or `::1`), auth is disabled and agents do not need to send an API key.
+
+If `API_HOST` is not loopback, `API_KEY` is required and the API refuses to start without it.
 
 If the API server is started with `API_KEY`, agents must send the same value in the `x-api-key` header:
 
@@ -59,7 +61,11 @@ The main route groups are:
 Common agent operations:
 
 ```text
+GET    /api/projects?workspaceId=WORKSPACE_ID
 GET    /api/projects/workspace/:workspaceId
+GET    /api/tasks
+GET    /api/tasks?workspaceId=WORKSPACE_ID
+GET    /api/tasks?projectId=PROJECT_ID
 GET    /api/tasks/project/:projectId
 POST   /api/tasks
 GET    /api/tasks/:id
@@ -67,6 +73,11 @@ PATCH  /api/tasks/:id
 POST   /api/tasks/:id/complete
 GET    /api/tasks/:id/comments
 POST   /api/tasks/:id/comments
+GET    /api/tasks/:id/attachments
+POST   /api/tasks/:id/attachments
+PATCH  /api/tasks/:id/attachments/:attachmentId
+POST   /api/tasks/:id/attachments/:attachmentId/open
+DELETE /api/tasks/:id/attachments/:attachmentId
 GET    /api/tasks/:id/subtasks
 POST   /api/tasks/:id/subtasks
 GET    /api/tags/:projectId
@@ -93,6 +104,18 @@ List project tasks:
 curl "$FOCUSCLAW_API/tasks/project/PROJECT_ID"
 ```
 
+List all workspace tasks as JSON:
+
+```bash
+curl "$FOCUSCLAW_API/tasks?workspaceId=WORKSPACE_ID"
+```
+
+List workspace projects:
+
+```bash
+curl "$FOCUSCLAW_API/projects?workspaceId=WORKSPACE_ID"
+```
+
 Create a task:
 
 ```bash
@@ -114,6 +137,30 @@ Complete a task:
 ```bash
 curl -X POST "$FOCUSCLAW_API/tasks/TASK_ID/complete"
 ```
+
+Add attachment metadata:
+
+```bash
+curl -X POST "$FOCUSCLAW_API/tasks/TASK_ID/attachments" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Draft carousel","kind":"pdf","uri":"/tmp/focusclaw-fixtures/carousel.pdf"}'
+```
+
+Rename attachment metadata without changing the stored path:
+
+```bash
+curl -X PATCH "$FOCUSCLAW_API/tasks/TASK_ID/attachments/ATTACHMENT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Renamed carousel"}'
+```
+
+Open an attachment on the machine running the FocusClaw API:
+
+```bash
+curl -X POST "$FOCUSCLAW_API/tasks/TASK_ID/attachments/ATTACHMENT_ID/open"
+```
+
+Attachments store local file or folder references only. FocusClaw does not upload, copy, host, or delete the original file. HTTP/HTTPS URL attachments are intentionally rejected. The local open endpoint checks that the path still exists and blocks executable/app-style attachments.
 
 ## Agent Guidance
 

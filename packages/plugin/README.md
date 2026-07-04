@@ -1,6 +1,6 @@
 # FocusClaw — OpenClaw Plugin
 
-The official OpenClaw plugin for FocusClaw task management. This plugin registers tools that allow AI agents to interact with FocusClaw tasks directly.
+The official OpenClaw plugin for FocusClaw task management. This plugin registers tools that let OpenClaw use FocusClaw as a local task source of truth.
 
 ## Tools Registered
 

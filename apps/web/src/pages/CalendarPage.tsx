@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { taskApi } from '@/lib/api'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
+import { DescriptionEditor } from '@/components/DescriptionEditor'
 import { TaskPanel } from '@/components/TaskPanel'
 import {
   DndContext,
@@ -15,7 +17,7 @@ import {
 } from '@dnd-kit/core'
 import {
   CalendarDays, AlertCircle, RefreshCw,
-  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X, ListTree
+  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X, ListTree, Paperclip, Repeat2
 } from 'lucide-react'
 import { getCalendarViewDefaults, getCalendarViewState, getOverviewPanelVisible, setCalendarViewState, setOverviewPanelVisible } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
@@ -48,6 +50,7 @@ interface Task {
   labels?: string
   subtaskTotal?: number
   subtaskCompleted?: number
+  attachmentTotal?: number
 }
 
 interface CommentEntry {
@@ -57,6 +60,17 @@ interface CommentEntry {
   changes: { content?: string; [key: string]: any }
   createdAt: string
   userId?: string
+}
+
+interface AttachmentEntry {
+  id: string
+  taskId: string
+  name: string
+  kind: string
+  uri: string
+  mimeType?: string | null
+  sizeBytes?: number | null
+  createdAt: string
 }
 
 interface CalendarCache {
@@ -118,7 +132,6 @@ const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: str
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const MAX_VISIBLE_DAY_TASKS = 2
-const DESCRIPTION_MAX_LENGTH = 5000
 
 function AssigneeBadge({ assignee, compact = false }: { assignee?: string; compact?: boolean }) {
   const owner = getAssigneeOption(assignee)
@@ -147,6 +160,32 @@ function SubtaskIndicator({ task, compact = false }: { task: Task; compact?: boo
     >
       <ListTree className={compact ? 'h-2.5 w-2.5 text-zinc-500' : 'h-3 w-3 text-zinc-500'} />
       {completed}/{total}
+    </span>
+  )
+}
+
+function formatRecurringLabel(recurring: string | undefined): string {
+  if (!recurring) return ''
+  const option = RECURRING_OPTIONS.find((item) => item.value === recurring)
+  return option ? `Repeats ${option.label.toLowerCase()}` : 'Repeats'
+}
+
+function RecurringIndicator({ recurring, compact = false }: { recurring?: string; compact?: boolean }) {
+  if (!recurring) return null
+  const label = formatRecurringLabel(recurring)
+  return (
+    <span className={`fc-recurring-icon ${compact ? 'fc-task-indicator-compact' : ''}`.trim()} title={label} aria-label={label}>
+      <Repeat2 className={compact ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'} />
+    </span>
+  )
+}
+
+function AttachmentIndicator({ count = 0, compact = false }: { count?: number; compact?: boolean }) {
+  if (count <= 0) return null
+  const label = `${count} ${count === 1 ? 'attachment' : 'attachments'}`
+  return (
+    <span className={`fc-recurring-icon fc-attachment-icon ${compact ? 'fc-task-indicator-compact' : ''}`.trim()} title={label} aria-label={label}>
+      <Paperclip className={compact ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'} />
     </span>
   )
 }
@@ -191,6 +230,8 @@ function CalendarTaskChip({ task, onOpen }: { task: Task; onOpen: (task: Task) =
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-[11px] leading-4">{task.title}</span>
         <SubtaskIndicator task={task} compact />
+        <RecurringIndicator recurring={task.recurring} compact />
+        <AttachmentIndicator count={task.attachmentTotal} compact />
       </span>
     </button>
   )
@@ -255,6 +296,8 @@ function CalendarAgendaTaskRow({ task, projectName, onOpen }: { task: Task; proj
           </span>
         )}
         <SubtaskIndicator task={task} />
+        <RecurringIndicator recurring={task.recurring} />
+        <AttachmentIndicator count={task.attachmentTotal} />
         <AssigneeBadge assignee={task.assignee} compact />
       </span>
     </button>
@@ -277,6 +320,8 @@ function shouldKeepTaskInCalendar(task: Task, projectFilter: string, showComplet
 }
 
 export default function CalendarPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const calendarDefaults = getCalendarViewDefaults()
   const calendarViewState = getCalendarViewState()
   const [tasks, setTasks] = useState<Task[]>(lastCalendarTasks)
@@ -361,13 +406,18 @@ export default function CalendarPage() {
   const [saving, setSaving] = useState(false)
 
   const [subtasks, setSubtasks] = useState<any[]>([])
+  const [attachments, setAttachments] = useState<AttachmentEntry[]>([])
   const [showSubtaskForm, setShowSubtaskForm] = useState(false)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [newSubtaskPriority, setNewSubtaskPriority] = useState(2)
   const [addingSubtask, setAddingSubtask] = useState(false)
   const [comments, setComments] = useState<CommentEntry[]>([])
   const [newComment, setNewComment] = useState('')
+  const [newAttachmentName, setNewAttachmentName] = useState('')
+  const [newAttachmentUri, setNewAttachmentUri] = useState('')
+  const [newAttachmentKind, setNewAttachmentKind] = useState('file')
   const [submittingComment, setSubmittingComment] = useState(false)
+  const [addingAttachment, setAddingAttachment] = useState(false)
 
   const setCachedTasks = (updater: Task[] | ((prev: Task[]) => Task[])) => {
     setTasks((prev) => {
@@ -383,6 +433,21 @@ export default function CalendarPage() {
       })
       return nextTasks
     })
+  }
+
+  const updateAttachmentTotal = (taskId: string, delta: number) => {
+    const updateTask = (task: Task) => (
+      task.id === taskId
+        ? { ...task, attachmentTotal: Math.max((task.attachmentTotal || 0) + delta, 0) }
+        : task
+    )
+    setCachedTasks((prev) => prev.map(updateTask))
+    setOverviewTasks((prev) => {
+      const nextTasks = prev.map(updateTask)
+      lastCalendarOverviewTasks = nextTasks
+      return nextTasks
+    })
+    setSelectedTask((prev) => prev ? updateTask(prev) : prev)
   }
 
   useEffect(() => { initWorkspace() }, [])
@@ -455,7 +520,7 @@ export default function CalendarPage() {
   const handleCreateTask = async (e: FormEvent) => {
     e.preventDefault()
     if (!newTitle.trim()) return
-    const targetProjectId = resolveTaskProjectId(newProjectId, activeProject)
+    const targetProjectId = resolveTaskProjectId(newProjectId)
     if (!targetProjectId) return
     setCreating(true)
     try {
@@ -581,8 +646,7 @@ export default function CalendarPage() {
     const defaultDueDate = today.getFullYear() === year && today.getMonth() === month
       ? today
       : new Date(year, month, 1)
-    const defaultProjectId = projectFilter !== 'all' ? projectFilter : activeProject
-    setNewProjectId(defaultProjectId || projects[0]?.id || '')
+    setNewProjectId('')
     setNewDueDate(formatDateInput(defaultDueDate))
     setShowNewTaskForm(true)
   }
@@ -595,6 +659,13 @@ export default function CalendarPage() {
     window.addEventListener(NEW_TASK_EVENT, handleNewTask)
     return () => window.removeEventListener(NEW_TASK_EVENT, handleNewTask)
   }, [initialized, projectFilter, activeProject, projects, year, month])
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('newTask') !== '1') return
+    if (!initialized) return
+    openNewTaskForm()
+    navigate('/calendar', { replace: true })
+  }, [location.search, initialized, projectFilter, activeProject, projects, year, month, navigate])
 
   const getTasksForDay = (day: number): Task[] => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -668,12 +739,13 @@ export default function CalendarPage() {
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
     setEditRecurring(task.recurring || '')
-    setPanelLoading(true); setSubtasks([]); setComments([]); setShowSubtaskForm(false)
+    setPanelLoading(true); setSubtasks([]); setComments([]); setAttachments([]); setShowSubtaskForm(false)
     try {
-      const [taskData, commentData, subtaskData] = await Promise.all([
+      const [taskData, commentData, subtaskData, attachmentData] = await Promise.all([
         taskApi.get(task.id),
         taskApi.getComments(task.id),
         taskApi.getSubtasks(task.id),
+        taskApi.getAttachments(task.id),
       ])
       setEditTitle(taskData.title); setEditDescription(taskData.description || '')
       setEditPriority(taskData.priority)
@@ -684,11 +756,15 @@ export default function CalendarPage() {
       setEditTags(taskData.labels ? JSON.parse(taskData.labels) : [])
       setComments(commentData.filter((c: CommentEntry) => c.action === 'comment'))
       setSubtasks(subtaskData)
+      setAttachments(attachmentData)
     } catch (err) { console.error('Failed to load task:', err) }
     finally { setPanelLoading(false) }
   }
 
-  const closeTaskPanel = () => { setSelectedTask(null); setComments([]); setNewComment('') }
+  const closeTaskPanel = () => {
+    setSelectedTask(null); setComments([]); setNewComment('')
+    setAttachments([]); setNewAttachmentName(''); setNewAttachmentUri(''); setNewAttachmentKind('file')
+  }
 
   const handleSaveTask = async () => {
     if (!selectedTask) return
@@ -811,6 +887,57 @@ export default function CalendarPage() {
     if (!selectedTask) return
     await taskApi.deleteComment(selectedTask.id, commentId)
     setComments((prev) => prev.filter((comment) => comment.id !== commentId))
+  }
+
+  const handleAddAttachment = async () => {
+    if (!selectedTask || !newAttachmentName.trim() || !newAttachmentUri.trim()) return
+    setAddingAttachment(true)
+    try {
+      const attachment = await taskApi.addAttachment(selectedTask.id, {
+        name: newAttachmentName.trim(),
+        kind: newAttachmentKind,
+        uri: newAttachmentUri.trim(),
+      })
+      setAttachments((prev) => [...prev, attachment])
+      updateAttachmentTotal(selectedTask.id, 1)
+      setNewAttachmentName('')
+      setNewAttachmentUri('')
+      setNewAttachmentKind('file')
+    } catch (err) { console.error(err) }
+    finally { setAddingAttachment(false) }
+  }
+
+  const handlePickLocalAttachment = async () => {
+    setAddingAttachment(true)
+    try {
+      const picked = await taskApi.pickLocalAttachment()
+      if (!picked) return
+      setNewAttachmentName((current) => current.trim() ? current : picked.name)
+      setNewAttachmentUri(picked.uri)
+      setNewAttachmentKind(picked.kind)
+    } catch (err) {
+      console.error(err)
+      throw err
+    }
+    finally { setAddingAttachment(false) }
+  }
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    if (!selectedTask) return
+    await taskApi.deleteAttachment(selectedTask.id, attachmentId)
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId))
+    updateAttachmentTotal(selectedTask.id, -1)
+  }
+
+  const handleUpdateAttachmentName = async (attachmentId: string, name: string) => {
+    if (!selectedTask) return
+    const updated = await taskApi.updateAttachmentName(selectedTask.id, attachmentId, name)
+    setAttachments((prev) => prev.map((attachment) => attachment.id === attachmentId ? updated : attachment))
+  }
+
+  const handleOpenAttachment = async (attachmentId: string) => {
+    if (!selectedTask) return
+    await taskApi.openAttachment(selectedTask.id, attachmentId)
   }
 
   const handleDeleteTask = async () => {
@@ -1114,8 +1241,12 @@ export default function CalendarPage() {
           saving={saving}
           comments={comments}
           subtasks={subtasks}
+          attachments={attachments}
           newComment={newComment}
+          newAttachmentName={newAttachmentName}
+          newAttachmentUri={newAttachmentUri}
           submittingComment={submittingComment}
+          addingAttachment={addingAttachment}
           showSubtaskForm={showSubtaskForm}
           newSubtaskTitle={newSubtaskTitle}
           newSubtaskPriority={newSubtaskPriority}
@@ -1129,6 +1260,7 @@ export default function CalendarPage() {
           setEditRecurring={setEditRecurring}
           setEditTags={setEditTags}
           setNewComment={setNewComment}
+          setNewAttachmentUri={setNewAttachmentUri}
           setShowSubtaskForm={setShowSubtaskForm}
           setNewSubtaskTitle={setNewSubtaskTitle}
           setNewSubtaskPriority={setNewSubtaskPriority}
@@ -1140,6 +1272,11 @@ export default function CalendarPage() {
           onUpdateSubtask={handleUpdateSubtask}
           onDeleteSubtask={handleDeleteSubtask}
           onAddComment={handleAddComment}
+          onAddAttachment={handleAddAttachment}
+          onPickLocalAttachment={handlePickLocalAttachment}
+          onOpenAttachment={handleOpenAttachment}
+          onUpdateAttachmentName={handleUpdateAttachmentName}
+          onDeleteAttachment={handleDeleteAttachment}
           onUpdateComment={handleUpdateComment}
           onDeleteComment={handleDeleteComment}
           projectId={activeProject}
@@ -1171,27 +1308,23 @@ export default function CalendarPage() {
                   autoFocus
                 />
               </div>
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Description (optional)</label>
-                <textarea
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  maxLength={DESCRIPTION_MAX_LENGTH}
-                  rows={2}
-                  className="input resize-none"
-                  placeholder="Add details..."
-                />
-                <div className={`mt-1 text-right text-[10px] leading-none ${newDescription.length > DESCRIPTION_MAX_LENGTH * 0.9 ? 'text-amber-300' : 'text-zinc-400'}`} aria-live="polite">
-                  {newDescription.length}/{DESCRIPTION_MAX_LENGTH}
-                </div>
-              </div>
+              <DescriptionEditor
+                value={newDescription}
+                onChange={setNewDescription}
+                label="Description"
+                rows={4}
+                minHeight={112}
+                placeholder="Add details..."
+              />
               <div>
                 <label className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Project</label>
                 <select
                   value={newProjectId}
                   onChange={(e) => setNewProjectId(e.target.value)}
                   className="input text-xs"
+                  required
                 >
+                  <option value="">Select a project</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>{project.name}</option>
                   ))}
@@ -1280,7 +1413,7 @@ export default function CalendarPage() {
                   })}
                 </div>
               </div>
-              <button type="submit" disabled={creating || !newTitle.trim() || !resolveTaskProjectId(newProjectId, activeProject)} className="btn btn-primary w-full">
+              <button type="submit" disabled={creating || !newTitle.trim() || !resolveTaskProjectId(newProjectId)} className="btn btn-primary w-full">
                 {creating ? 'Creating...' : 'Create Task'}
               </button>
             </form>

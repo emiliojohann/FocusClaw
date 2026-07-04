@@ -14,7 +14,7 @@ import {
   type TaskSort,
 } from '@/lib/viewSettings'
 import { ensureProjectContext, type ProjectRecord } from '@/lib/projectContext'
-import { THEME_OPTIONS, getThemePreference, setThemePreference, type ThemePreference } from '@/lib/themeSettings'
+import { THEME_FAMILY_OPTIONS, THEME_OPTIONS, getThemeFamily, getThemePreference, setThemeFamily, setThemePreference, type ThemeFamily, type ThemePreference } from '@/lib/themeSettings'
 interface SavedTag { id: string; name: string; projectId?: string; color?: string }
 
 type DeleteProjectMode = 'deleteTasks' | 'moveTasks'
@@ -84,6 +84,7 @@ const TAG_COLORS = [
 
 const HOUR_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1)
 const MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
+const MIN_EXPORT_PASSPHRASE_LENGTH = 12
 const TAG_PREVIEW_LIMIT = 15
 const TAG_SOFT_WARNING_COUNT = 60
 
@@ -123,6 +124,7 @@ export default function SettingsPage() {
   const [defaultFilter, setDefaultFilter] = useState<TaskFilter>(TASK_VIEW_DEFAULTS.filter)
   const [defaultShowCompleted, setDefaultShowCompleted] = useState(CALENDAR_VIEW_DEFAULTS.showCompleted)
   const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference())
+  const [themeFamily, setThemeFamilyState] = useState<ThemeFamily>(() => getThemeFamily())
 
   const [savedMessage, setSavedMessage] = useState('')
   const [backups, setBackups] = useState<LocalBackupInfo[]>(initialSettingsCache?.backups ?? [])
@@ -409,11 +411,6 @@ export default function SettingsPage() {
     window.setTimeout(() => setSavedMessage(''), 1500)
   }
 
-  const chooseTheme = (preference: ThemePreference) => {
-    setTheme(preference)
-    setThemePreference(preference)
-  }
-
   const resetDefaults = () => {
     setDefaultSort(TASK_VIEW_DEFAULTS.sort)
     setDefaultFilter(TASK_VIEW_DEFAULTS.filter)
@@ -548,8 +545,8 @@ export default function SettingsPage() {
 
   const exportEncryptedSnapshot = async () => {
     if (!exportBackup || !exportPassphrase.trim()) return
-    if (exportPassphrase.length < 6) {
-      setBackupError('Passphrase must be at least 6 characters')
+    if (exportPassphrase.length < MIN_EXPORT_PASSPHRASE_LENGTH) {
+      setBackupError(`Passphrase must be at least ${MIN_EXPORT_PASSPHRASE_LENGTH} characters`)
       return
     }
     setBackupLoading(true)
@@ -588,10 +585,6 @@ export default function SettingsPage() {
 
   const requestImportBackup = () => {
     if (!selectedBackupFile || !importPassphrase.trim()) return
-    if (importPassphrase.length < 6) {
-      setBackupError('Passphrase must be at least 6 characters')
-      return
-    }
     setImportConfirmOpen(true)
   }
 
@@ -667,25 +660,53 @@ export default function SettingsPage() {
               <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Local</span>
             </div>
 
-            <div>
-              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Theme</label>
-              <div className="grid grid-cols-3 gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-1">
-                {THEME_OPTIONS.map((option) => {
-                  const active = theme === option.value
-                  const Icon = option.value === 'system' ? Monitor : option.value === 'dark' ? Moon : Sun
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => chooseTheme(option.value)}
-                      className={`btn h-10 text-xs ${active ? 'btn-primary' : 'btn-ghost'}`}
-                      aria-pressed={active}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      {option.label}
-                    </button>
-                  )
-                })}
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Mode</label>
+                <div className="grid grid-cols-3 gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-1">
+                  {THEME_OPTIONS.map((option) => {
+                    const active = theme === option.value
+                    const Icon = option.value === 'system' ? Monitor : option.value === 'dark' ? Moon : Sun
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setTheme(option.value)
+                          setThemePreference(option.value)
+                        }}
+                        className={`btn h-10 justify-center text-xs ${active ? 'btn-primary' : 'btn-ghost'}`}
+                        aria-pressed={active}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Theme</label>
+                <div className="grid grid-cols-2 gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-1">
+                  {THEME_FAMILY_OPTIONS.map((option) => {
+                    const active = themeFamily === option.value
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setThemeFamilyState(option.value)
+                          setThemeFamily(option.value)
+                        }}
+                        className={`btn h-10 justify-center text-xs ${active ? 'btn-primary' : 'btn-ghost'}`}
+                        aria-pressed={active}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </section>
@@ -818,7 +839,7 @@ export default function SettingsPage() {
                                 <button onClick={() => startProjectRename(project)} className="btn btn-ghost p-1.5" title="Rename project">
                                   <Pencil className="w-3.5 h-3.5" />
                                 </button>
-                                <button onClick={() => requestProjectDelete(project)} className="btn btn-ghost p-1.5 text-red-400 hover:bg-red-500/10" title="Delete project">
+                                <button onClick={() => requestProjectDelete(project)} className="btn btn-ghost p-1.5 text-red-400" title="Delete project">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
@@ -942,7 +963,7 @@ export default function SettingsPage() {
                                     <button onClick={() => { setEditingTagId(tag.id); setEditingTagName(tag.name) }} className="btn btn-ghost p-1.5" title="Rename">
                                       <Pencil className="w-3.5 h-3.5" />
                                     </button>
-                                    <button onClick={() => setTagPendingDelete(tag)} className="btn btn-ghost p-1.5 text-red-400 hover:bg-red-500/10" title="Delete">
+                                    <button onClick={() => setTagPendingDelete(tag)} className="btn btn-ghost p-1.5 text-red-400" title="Delete">
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
@@ -1140,7 +1161,7 @@ export default function SettingsPage() {
                     <button onClick={() => requestEncryptedExport(backup)} className="btn btn-ghost p-1.5" title="Encrypted download">
                       <Download className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => setDeleteBackupTarget(backup)} className="btn btn-ghost p-1.5 text-red-400 hover:bg-red-500/10" title="Delete snapshot">
+                    <button onClick={() => setDeleteBackupTarget(backup)} className="btn btn-ghost p-1.5 text-red-400" title="Delete snapshot">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1236,7 +1257,7 @@ export default function SettingsPage() {
                   href="https://donate.stripe.com/fZu3cv8dF0sN3lO77KgMw00"
                   target="_blank"
                   rel="noreferrer"
-                  className="btn btn-danger inline-flex w-full items-center justify-center text-xs sm:w-auto"
+                  className="btn btn-primary inline-flex w-full items-center justify-center text-xs sm:w-auto"
                 >
                   Donate to FocusClaw
                 </a>
@@ -1303,7 +1324,7 @@ export default function SettingsPage() {
                 className="input text-xs"
                 placeholder="Passphrase (not stored)"
               />
-              <p className="text-xs text-zinc-500 mt-2">This passphrase will be required to import the downloaded file.</p>
+              <p className="text-xs text-zinc-500 mt-2">Use at least {MIN_EXPORT_PASSPHRASE_LENGTH} characters. This passphrase will be required to import the downloaded file.</p>
               <div className="flex items-center justify-end gap-2 mt-5">
                 <button onClick={() => setExportBackup(null)} className="btn btn-secondary text-xs" disabled={backupLoading}>
                   Cancel
@@ -1372,7 +1393,7 @@ export default function SettingsPage() {
                 <button onClick={() => setDeleteBackupTarget(null)} className="btn btn-secondary text-xs" disabled={backupLoading}>
                   Cancel
                 </button>
-                <button onClick={deleteBackup} className="btn text-xs bg-red-500/15 text-red-300 hover:bg-red-500/25" disabled={backupLoading}>
+                <button onClick={deleteBackup} className="btn text-xs bg-red-500/15 text-red-300" disabled={backupLoading}>
                   <Trash2 className="w-3.5 h-3.5" />
                   {backupLoading ? 'Deleting...' : 'Delete Snapshot'}
                 </button>
@@ -1448,7 +1469,7 @@ export default function SettingsPage() {
                 <button onClick={cancelProjectDelete} className="btn btn-secondary w-full text-xs" disabled={deletingProject}>
                   Cancel
                 </button>
-                <button onClick={confirmProjectDelete} className="btn w-full text-xs bg-red-500/15 text-red-300 hover:bg-red-500/25" disabled={deletingProject || (deleteProjectMode === 'moveTasks' && !deleteProjectTargetId)}>
+                <button onClick={confirmProjectDelete} className="btn w-full text-xs bg-red-500/15 text-red-300" disabled={deletingProject || (deleteProjectMode === 'moveTasks' && !deleteProjectTargetId)}>
                   {deletingProject ? 'Deleting...' : 'Delete Project'}
                 </button>
               </div>

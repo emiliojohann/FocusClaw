@@ -4,6 +4,20 @@ import { projects } from '../db/schema'
 import { and, eq, asc } from 'drizzle-orm'
 
 export async function projectRoutes(fastify: FastifyInstance) {
+  // List projects, optionally scoped by workspace.
+  fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { workspaceId } = request.query as { workspaceId?: string }
+
+    const result = workspaceId
+      ? await db.select().from(projects)
+        .where(eq(projects.workspaceId, workspaceId))
+        .orderBy(asc(projects.createdAt))
+      : await db.select().from(projects)
+        .orderBy(asc(projects.createdAt))
+
+    return reply.send(result)
+  })
+
   // Create project
   fastify.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const { workspaceId, name, description } = request.body as {

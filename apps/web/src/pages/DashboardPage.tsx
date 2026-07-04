@@ -4,10 +4,11 @@ import { taskApi, tagApi } from '@/lib/api'
 import {
   Check, Plus, X,
   ChevronRight, AlertCircle, RefreshCw, Clock, Repeat2,
-  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search
+  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
+import { DescriptionEditor } from '@/components/DescriptionEditor'
 import { TaskPanel } from '@/components/TaskPanel'
 import { getOverviewPanelVisible, getTaskViewDefaults, getTaskViewMode, getTaskViewState, setOverviewPanelVisible, setTaskViewMode, setTaskViewState, type TaskFilter, type TaskSort, type TaskViewMode } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
@@ -44,6 +45,7 @@ interface Task {
   tags?: TagRecord[]
   subtaskTotal?: number
   subtaskCompleted?: number
+  attachmentTotal?: number
 }
 
 interface TagRecord {
@@ -72,6 +74,17 @@ interface CommentEntry {
   changes: { content?: string; [key: string]: any }
   createdAt: string
   userId?: string
+}
+
+interface AttachmentEntry {
+  id: string
+  taskId: string
+  name: string
+  kind: string
+  uri: string
+  mimeType?: string | null
+  sizeBytes?: number | null
+  createdAt: string
 }
 
 interface DashboardCache {
@@ -116,7 +129,6 @@ function writeDashboardCache(snapshot: DashboardCache) {
 
 const initialDashboardCache = readDashboardCache()
 const TASK_VISIBLE_INCREMENT = 50
-const DESCRIPTION_MAX_LENGTH = 5000
 
 let lastDashboardTasks: Task[] = initialDashboardCache?.tasks ?? []
 let lastDashboardProjects: ProjectRecord[] = initialDashboardCache?.projects ?? []
@@ -142,8 +154,8 @@ function getDueDateClass(dueDateStr: string | undefined): string {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
   if (due < today) return 'text-red-400'
-  if (due >= today && due < tomorrow) return 'text-amber-400'
-  if (due.toDateString() === tomorrow.toDateString()) return 'text-amber-400'
+  if (due >= today && due < tomorrow) return 'text-[var(--warning)]'
+  if (due.toDateString() === tomorrow.toDateString()) return 'text-[var(--warning)]'
   return 'text-[var(--text-secondary)]'
 }
 
@@ -170,6 +182,16 @@ function RecurringIndicator({ recurring, className = '' }: { recurring?: string;
   return (
     <span className={`fc-recurring-icon ${className}`.trim()} title={label} aria-label={label}>
       <Repeat2 className="w-3.5 h-3.5" />
+    </span>
+  )
+}
+
+function AttachmentIndicator({ count = 0, className = '' }: { count?: number; className?: string }) {
+  if (count <= 0) return null
+  const label = `${count} ${count === 1 ? 'attachment' : 'attachments'}`
+  return (
+    <span className={`fc-recurring-icon fc-attachment-icon ${className}`.trim()} title={label} aria-label={label}>
+      <Paperclip className="w-3.5 h-3.5" />
     </span>
   )
 }
@@ -227,6 +249,47 @@ function shouldKeepTaskInDashboard(task: Task, projectFilter: string, filter: Ta
   return isTaskInProjectFilter(task, projectFilter) && isTaskInDateFilter(task, filter)
 }
 
+function taskMatchesTagFilter(task: Task, tagFilter: string, allTags: TagRecord[]): boolean {
+  if (tagFilter === 'all') return true
+  if (task.tags?.some((tag) => tag.id === tagFilter)) return true
+  if (!task.labels) return false
+
+  try {
+    const labels = JSON.parse(task.labels) as string[]
+    const selectedTag = allTags.find((tag) => tag.id === tagFilter)
+    return Array.isArray(labels) && !!selectedTag && labels.includes(selectedTag.name)
+  } catch {
+    return false
+  }
+}
+
+function taskMatchesSearch(task: Task, searchValue: string): boolean {
+  const query = searchValue.trim().toLowerCase()
+  if (!query) return true
+  return [task.title, task.description]
+    .filter((value): value is string => typeof value === 'string')
+    .some((value) => value.toLowerCase().includes(query))
+}
+
+function shouldShowTaskInCurrentView(
+  task: Task,
+  options: {
+    projectFilter: string
+    filter: TaskFilter
+    assigneeFilter: AssigneeFilter
+    tagFilter: string
+    searchValue: string
+    allTags: TagRecord[]
+  }
+): boolean {
+  return (
+    shouldKeepTaskInDashboard(task, options.projectFilter, options.filter) &&
+    assigneeMatchesFilter(task.assignee, options.assigneeFilter) &&
+    taskMatchesTagFilter(task, options.tagFilter, options.allTags) &&
+    taskMatchesSearch(task, options.searchValue)
+  )
+}
+
 function AssigneeBadge({ assignee }: { assignee?: string }) {
   const owner = getAssigneeOption(assignee)
   const Icon = owner.icon
@@ -264,9 +327,10 @@ export default function DashboardPage() {
   const [activeWorkspace, setActiveWorkspace] = useState(lastDashboardWorkspace)
   const [activeProject, setActiveProject] = useState(lastDashboardProject)
   const [projectFilter, setProjectFilter] = useState(taskViewState.projectFilter || lastDashboardProjectFilter)
-  const [loading, setLoading] = useState(!initialDashboardCache)
+  const [loading, setLoading] = useState(!initialDashboardCache || lastDashboardTasks.length === 0)
   const [initialized, setInitialized] = useState(lastDashboardProjects.length > 0)
   const [initError, setInitError] = useState('')
+  const [emptyStateVisible, setEmptyStateVisible] = useState(false)
 
   const [showNewTaskForm, setShowNewTaskForm] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -303,8 +367,13 @@ export default function DashboardPage() {
   const [deletingTask, setDeletingTask] = useState(false)
   const [panelLoading, setPanelLoading] = useState(false)
   const [comments, setComments] = useState<CommentEntry[]>([])
+  const [attachments, setAttachments] = useState<AttachmentEntry[]>([])
   const [newComment, setNewComment] = useState('')
+  const [newAttachmentName, setNewAttachmentName] = useState('')
+  const [newAttachmentUri, setNewAttachmentUri] = useState('')
+  const [newAttachmentKind, setNewAttachmentKind] = useState('file')
   const [submittingComment, setSubmittingComment] = useState(false)
+  const [addingAttachment, setAddingAttachment] = useState(false)
 
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
@@ -362,6 +431,16 @@ export default function DashboardPage() {
       })
       return nextTasks
     })
+  }
+
+  const updateAttachmentTotal = (taskId: string, delta: number) => {
+    const updateTask = (task: Task) => (
+      task.id === taskId
+        ? { ...task, attachmentTotal: Math.max((task.attachmentTotal || 0) + delta, 0) }
+        : task
+    )
+    setCachedTasks((prev) => prev.map(updateTask))
+    setSelectedTask((prev) => prev ? updateTask(prev) : prev)
   }
 
   function updateTaskSearch(value: string) {
@@ -570,7 +649,7 @@ export default function DashboardPage() {
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newTitle.trim()) return
-    const targetProjectId = resolveTaskProjectId(newProjectId, activeProject)
+    const targetProjectId = resolveTaskProjectId(newProjectId)
     if (!targetProjectId) return
     setCreating(true)
     try {
@@ -590,7 +669,18 @@ export default function DashboardPage() {
         lastDashboardProjectFilter = targetProjectId
         setTaskViewState({ projectFilter: targetProjectId })
       }
-      setCachedTasks((prev) => [task, ...prev])
+      const nextProjectFilter = projectFilter !== 'all' && projectFilter !== targetProjectId ? targetProjectId : projectFilter
+      const keepCreatedTask = shouldShowTaskInCurrentView(task, {
+        projectFilter: nextProjectFilter,
+        filter,
+        assigneeFilter,
+        tagFilter,
+        searchValue: debouncedSearchQuery,
+        allTags,
+      })
+      if (keepCreatedTask) {
+        setCachedTasks((prev) => [task, ...prev].sort((a, b) => compareTasks(a, b, sort)))
+      }
       setNewTitle(''); setNewDescription(''); setNewPriority(2)
       setNewDueDate(''); setNewAssignee(''); setNewProjectId(''); setNewRecurring(''); setShowNewTaskForm(false)
       await loadTasks({ projectFilterOverride: projectFilter !== 'all' && projectFilter !== targetProjectId ? targetProjectId : undefined })
@@ -599,8 +689,7 @@ export default function DashboardPage() {
   }
 
   const openNewTaskForm = () => {
-    const defaultProjectId = projectFilter !== 'all' ? projectFilter : activeProject
-    setNewProjectId(defaultProjectId || projects[0]?.id || '')
+    setNewProjectId('')
     setShowNewTaskForm(true)
   }
 
@@ -659,6 +748,7 @@ export default function DashboardPage() {
   const closeTaskPanel = () => {
     if (taskPendingDelete) return
     setSelectedTask(null); setComments([]); setNewComment('')
+    setAttachments([]); setNewAttachmentName(''); setNewAttachmentUri(''); setNewAttachmentKind('file')
   }
 
   const cancelDeleteTask = () => {
@@ -676,10 +766,10 @@ export default function DashboardPage() {
     setEditProjectId(task.projectId || activeProject)
     setEditRecurring(task.recurring || '')
     setEditTags(task.labels ? JSON.parse(task.labels) : [])
-    setPanelLoading(true); setSubtasks([]); setShowSubtaskForm(false)
+    setPanelLoading(true); setSubtasks([]); setAttachments([]); setShowSubtaskForm(false)
     try {
-      const [taskData, commentData, subtaskData] = await Promise.all([
-        taskApi.get(task.id), taskApi.getComments(task.id), taskApi.getSubtasks(task.id),
+      const [taskData, commentData, subtaskData, attachmentData] = await Promise.all([
+        taskApi.get(task.id), taskApi.getComments(task.id), taskApi.getSubtasks(task.id), taskApi.getAttachments(task.id),
       ])
       setEditTitle(taskData.title); setEditDescription(taskData.description || '')
       setEditPriority(taskData.priority)
@@ -690,6 +780,7 @@ export default function DashboardPage() {
       setEditTags(taskData.labels ? JSON.parse(taskData.labels) : [])
       setComments(commentData.filter((c: CommentEntry) => c.action === 'comment'))
       setSubtasks(subtaskData)
+      setAttachments(attachmentData)
     } catch (err) { console.error(err) }
     finally { setPanelLoading(false) }
   }
@@ -706,7 +797,14 @@ export default function DashboardPage() {
         recurring: editRecurring || null,
         labels: editTags,
       })
-      const keepUpdatedTask = shouldKeepTaskInDashboard(updated, projectFilter, filter)
+      const keepUpdatedTask = shouldShowTaskInCurrentView(updated, {
+        projectFilter,
+        filter,
+        assigneeFilter,
+        tagFilter,
+        searchValue: debouncedSearchQuery,
+        allTags,
+      })
       setCachedTasks((prev) => (
         keepUpdatedTask
           ? prev.map((t) => t.id === selectedTask.id ? updated : t).sort((a, b) => compareTasks(a, b, sort))
@@ -798,24 +896,76 @@ export default function DashboardPage() {
     setComments((prev) => prev.filter((comment) => comment.id !== commentId))
   }
 
+  const handleAddAttachment = async () => {
+    if (!selectedTask || !newAttachmentName.trim() || !newAttachmentUri.trim()) return
+    setAddingAttachment(true)
+    try {
+      const attachment = await taskApi.addAttachment(selectedTask.id, {
+        name: newAttachmentName.trim(),
+        kind: newAttachmentKind,
+        uri: newAttachmentUri.trim(),
+      })
+      setAttachments((prev) => [...prev, attachment])
+      updateAttachmentTotal(selectedTask.id, 1)
+      setNewAttachmentName('')
+      setNewAttachmentUri('')
+      setNewAttachmentKind('file')
+    } catch (err) { console.error(err) }
+    finally { setAddingAttachment(false) }
+  }
+
+  const handlePickLocalAttachment = async () => {
+    setAddingAttachment(true)
+    try {
+      const picked = await taskApi.pickLocalAttachment()
+      if (!picked) return
+      setNewAttachmentName((current) => current.trim() ? current : picked.name)
+      setNewAttachmentUri(picked.uri)
+      setNewAttachmentKind(picked.kind)
+    } catch (err) {
+      console.error(err)
+      throw err
+    }
+    finally { setAddingAttachment(false) }
+  }
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    if (!selectedTask) return
+    await taskApi.deleteAttachment(selectedTask.id, attachmentId)
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId))
+    updateAttachmentTotal(selectedTask.id, -1)
+  }
+
+  const handleUpdateAttachmentName = async (attachmentId: string, name: string) => {
+    if (!selectedTask) return
+    const updated = await taskApi.updateAttachmentName(selectedTask.id, attachmentId, name)
+    setAttachments((prev) => prev.map((attachment) => attachment.id === attachmentId ? updated : attachment))
+  }
+
+  const handleOpenAttachment = async (attachmentId: string) => {
+    if (!selectedTask) return
+    await taskApi.openAttachment(selectedTask.id, attachmentId)
+  }
+
   const filteredTasks = tasks.filter((task) => {
     if (!assigneeMatchesFilter(task.assignee, assigneeFilter)) return false
-    if (tagFilter === 'all') return true
-    if (task.tags?.some((tag) => tag.id === tagFilter)) return true
-    if (!task.labels) return false
-    try {
-      const labels = JSON.parse(task.labels) as string[]
-      const selectedTag = allTags.find((tag) => tag.id === tagFilter)
-      return Array.isArray(labels) && !!selectedTag && labels.includes(selectedTag.name)
-    } catch {
-      return false
-    }
+    return taskMatchesTagFilter(task, tagFilter, allTags)
   })
   const selectedTagName = allTags.find((tag) => tag.id === tagFilter)?.name
   const visibleTasks = filteredTasks.slice(0, visibleTaskCount)
   const hiddenTaskCount = Math.max(filteredTasks.length - visibleTasks.length, 0)
   const displayedStats = getTaskOverviewStats(filteredTasks)
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
+
+  useEffect(() => {
+    if (loading || filteredTasks.length > 0) {
+      setEmptyStateVisible(false)
+      return
+    }
+
+    const handle = window.setTimeout(() => setEmptyStateVisible(true), 250)
+    return () => window.clearTimeout(handle)
+  }, [loading, filteredTasks.length])
 
   if (initError) {
     return (
@@ -888,31 +1038,29 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="fc-work-header-actions flex items-center justify-end gap-1.5 min-w-0 sm:gap-2">
-              {initialized ? (
-                <div className="relative hidden w-[190px] shrink-0 lg:block">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    ref={desktopSearchInputRef}
-                    type="search"
-                    value={searchQuery}
-                    onChange={(e) => updateTaskSearch(e.target.value)}
-                    placeholder="Search tasks"
-                    className="input fc-control fc-search-input w-full text-xs"
-                    aria-label="Search tasks"
-                  />
-                  {searchQuery ? (
-                    <button
-                      type="button"
-                      onClick={() => clearTaskSearch()}
-                      className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-200"
-                      aria-label="Clear task search"
-                      title="Clear search"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
+              <div className="relative hidden w-[190px] shrink-0 sm:block">
+                <input
+                  ref={desktopSearchInputRef}
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => updateTaskSearch(e.target.value)}
+                  placeholder="Search tasks"
+                  disabled={!initialized}
+                  className="input fc-control fc-search-input fc-search-input-desktop w-full text-xs"
+                  aria-label="Search tasks"
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => clearTaskSearch()}
+                    className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-200"
+                    aria-label="Clear task search"
+                    title="Clear search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </div>
               <button
                 onClick={openNewTaskForm}
                 disabled={!initialized}
@@ -931,41 +1079,41 @@ export default function DashboardPage() {
                   style={resetSpinning ? { animation: 'spinOnce 0.45s linear 1' } : undefined}
                 />
               </button>
-              {initialized ? (
-                mobileSearchExpanded || searchQuery ? (
-                  <div className="relative w-[190px] min-w-[190px] shrink-0 lg:hidden">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
-                    <input
-                      ref={mobileSearchInputRef}
-                      type="search"
-                      value={searchQuery}
-                      onChange={(e) => updateTaskSearch(e.target.value)}
-                      placeholder="Search tasks"
-                      className="input fc-control fc-search-input w-full text-xs"
-                      aria-label="Search tasks"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => clearTaskSearch(true)}
-                      className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-200"
-                      aria-label="Close task search"
-                      title="Close search"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
+              {mobileSearchExpanded || searchQuery ? (
+                <div className="relative w-[190px] min-w-[190px] shrink-0 fc-mobile-search-only">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    ref={mobileSearchInputRef}
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => updateTaskSearch(e.target.value)}
+                    placeholder="Search tasks"
+                    disabled={!initialized}
+                    className="input fc-control fc-search-input w-full text-xs"
+                    aria-label="Search tasks"
+                  />
                   <button
                     type="button"
-                    onClick={openMobileTaskSearch}
-                    className="btn btn-secondary text-xs fc-control !w-9 !p-0 shrink-0 lg:hidden"
-                    aria-label="Search tasks"
-                    title="Search tasks"
+                    onClick={() => clearTaskSearch(true)}
+                    className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-200"
+                    aria-label="Close task search"
+                    title="Close search"
                   >
-                    <Search className="h-3.5 w-3.5" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
-                )
-              ) : null}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openMobileTaskSearch}
+                  disabled={!initialized}
+                  className="btn btn-secondary text-xs fc-control !w-9 !p-0 shrink-0 fc-mobile-search-only"
+                  aria-label="Search tasks"
+                  title="Search tasks"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                </button>
+              )}
               {initialized ? (
                 <select
                   value={projectFilter}
@@ -1057,7 +1205,7 @@ export default function DashboardPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
-          {loading ? (
+          {loading || (filteredTasks.length === 0 && !emptyStateVisible) ? (
             <div className="flex items-center justify-center py-20">
               <div className="spinner" />
             </div>
@@ -1107,6 +1255,7 @@ export default function DashboardPage() {
                       <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
                         <SubtaskIndicator task={task} />
                         <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-mobile" />
+                        <AttachmentIndicator count={task.attachmentTotal} className="fc-recurring-icon-mobile" />
                         <AssigneeBadge assignee={task.assignee} />
                       </div>
                     </div>
@@ -1132,6 +1281,7 @@ export default function DashboardPage() {
                         </span>
                       )}
                       <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-desktop" />
+                      <AttachmentIndicator count={task.attachmentTotal} className="fc-recurring-icon-desktop" />
                     </div>
                   </div>
                 )
@@ -1179,6 +1329,7 @@ export default function DashboardPage() {
                           <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
                             <SubtaskIndicator task={task} />
                             <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-mobile" />
+                            <AttachmentIndicator count={task.attachmentTotal} className="fc-recurring-icon-mobile" />
                             <AssigneeBadge assignee={task.assignee} />
                             <ChevronRight className="hidden sm:block w-4 h-4 text-zinc-600 flex-shrink-0" />
                           </div>
@@ -1198,6 +1349,7 @@ export default function DashboardPage() {
                             </span>
                           )}
                           <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-desktop" />
+                          <AttachmentIndicator count={task.attachmentTotal} className="fc-recurring-icon-desktop" />
                         </div>
                       </div>
                     </div>
@@ -1231,8 +1383,12 @@ export default function DashboardPage() {
           saving={saving}
           comments={comments}
           subtasks={subtasks}
+          attachments={attachments}
           newComment={newComment}
+          newAttachmentName={newAttachmentName}
+          newAttachmentUri={newAttachmentUri}
           submittingComment={submittingComment}
+          addingAttachment={addingAttachment}
           showSubtaskForm={showSubtaskForm}
           newSubtaskTitle={newSubtaskTitle}
           newSubtaskPriority={newSubtaskPriority}
@@ -1246,6 +1402,7 @@ export default function DashboardPage() {
           setEditRecurring={setEditRecurring}
           setEditTags={setEditTags}
           setNewComment={setNewComment}
+          setNewAttachmentUri={setNewAttachmentUri}
           setShowSubtaskForm={setShowSubtaskForm}
           setNewSubtaskTitle={setNewSubtaskTitle}
           setNewSubtaskPriority={setNewSubtaskPriority}
@@ -1258,6 +1415,11 @@ export default function DashboardPage() {
           onUpdateSubtask={handleUpdateSubtask}
           onDeleteSubtask={handleDeleteSubtask}
           onAddComment={handleAddComment}
+          onAddAttachment={handleAddAttachment}
+          onPickLocalAttachment={handlePickLocalAttachment}
+          onOpenAttachment={handleOpenAttachment}
+          onUpdateAttachmentName={handleUpdateAttachmentName}
+          onDeleteAttachment={handleDeleteAttachment}
           onUpdateComment={handleUpdateComment}
           onDeleteComment={handleDeleteComment}
           projectId={activeProject}
@@ -1289,27 +1451,23 @@ export default function DashboardPage() {
                   autoFocus
                 />
               </div>
-              <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Description (optional)</label>
-                <textarea
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  maxLength={DESCRIPTION_MAX_LENGTH}
-                  rows={2}
-                  className="input resize-none"
-                  placeholder="Add details..."
-                />
-                <div className={`mt-1 text-right text-[10px] leading-none ${newDescription.length > DESCRIPTION_MAX_LENGTH * 0.9 ? 'text-amber-300' : 'text-zinc-400'}`} aria-live="polite">
-                  {newDescription.length}/{DESCRIPTION_MAX_LENGTH}
-                </div>
-              </div>
+              <DescriptionEditor
+                value={newDescription}
+                onChange={setNewDescription}
+                label="Description"
+                rows={4}
+                minHeight={112}
+                placeholder="Add details..."
+              />
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Project</label>
                 <select
                   value={newProjectId}
                   onChange={(e) => setNewProjectId(e.target.value)}
                   className="input text-xs"
+                  required
                 >
+                  <option value="">Select a project</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>{project.name}</option>
                   ))}
@@ -1398,7 +1556,7 @@ export default function DashboardPage() {
                   })}
                 </div>
               </div>
-              <button type="submit" disabled={creating || !newTitle.trim() || !resolveTaskProjectId(newProjectId, activeProject)} className="btn btn-primary w-full">
+              <button type="submit" disabled={creating || !newTitle.trim() || !resolveTaskProjectId(newProjectId)} className="btn btn-primary w-full">
                 {creating ? 'Creating...' : 'Create Task'}
               </button>
             </form>
@@ -1429,7 +1587,7 @@ export default function DashboardPage() {
                 <button onClick={cancelDeleteTask} className="btn btn-secondary w-full text-xs" disabled={deletingTask}>
                   Cancel
                 </button>
-                <button onClick={handleDeleteTask} className="btn w-full text-xs bg-red-500/15 text-red-300 hover:bg-red-500/25" disabled={deletingTask}>
+                <button onClick={handleDeleteTask} className="btn w-full text-xs bg-red-500/15 text-red-300" disabled={deletingTask}>
                   {deletingTask ? 'Deleting...' : 'Delete'}
                 </button>
               </div>

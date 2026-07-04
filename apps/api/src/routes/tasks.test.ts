@@ -47,6 +47,16 @@ test('API_KEY protects API routes and leaves health public', async () => {
   }
 })
 
+test('API_KEY is required when API host is not loopback', async () => {
+  delete process.env.API_KEY
+  process.env.API_HOST = '0.0.0.0'
+  try {
+    await assert.rejects(() => createServer(), /API_KEY is required/)
+  } finally {
+    delete process.env.API_HOST
+  }
+})
+
 test('GET /api/tasks/:id/activity returns activity rows', async () => {
   const server = await createServer()
   try {
@@ -203,7 +213,7 @@ test('task comments can be edited and deleted', async () => {
   }
 })
 
-test('task descriptions allow 5000 chars and reject longer text', async () => {
+test('task descriptions allow 10000 chars and reject longer text', async () => {
   const server = await createServer()
   try {
     const workspaceResponse = await server.inject({
@@ -228,7 +238,7 @@ test('task descriptions allow 5000 chars and reject longer text', async () => {
       payload: {
         projectId: project.id,
         title: 'Long description task',
-        description: 'x'.repeat(5000),
+        description: 'x'.repeat(10000),
       },
     })
     assert.equal(accepted.statusCode, 201)
@@ -240,19 +250,313 @@ test('task descriptions allow 5000 chars and reject longer text', async () => {
       payload: {
         projectId: project.id,
         title: 'Too long description task',
-        description: 'x'.repeat(5001),
+        description: 'x'.repeat(10001),
       },
     })
     assert.equal(rejectedCreate.statusCode, 400)
-    assert.match(rejectedCreate.json().error, /5000 chars or less/)
+    assert.match(rejectedCreate.json().error, /10000 chars or less/)
 
     const rejectedUpdate = await server.inject({
       method: 'PATCH',
       url: `/api/tasks/${task.id}`,
-      payload: { description: 'x'.repeat(5001) },
+      payload: { description: 'x'.repeat(10001) },
     })
     assert.equal(rejectedUpdate.statusCode, 400)
-    assert.match(rejectedUpdate.json().error, /5000 chars or less/)
+    assert.match(rejectedUpdate.json().error, /10000 chars or less/)
+  } finally {
+    await server.close()
+  }
+})
+
+test('agent-friendly tasks route lists all tasks and supports workspace/project filters', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Agent Workspace', slug: `agent-routes-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const otherWorkspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Other Agent Workspace', slug: `other-agent-routes-${Date.now()}` },
+    })
+    assert.equal(otherWorkspaceResponse.statusCode, 201)
+    const otherWorkspace = otherWorkspaceResponse.json()
+
+    const firstProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Content' },
+    })
+    assert.equal(firstProjectResponse.statusCode, 201)
+    const firstProject = firstProjectResponse.json()
+
+    const secondProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Ops' },
+    })
+    assert.equal(secondProjectResponse.statusCode, 201)
+    const secondProject = secondProjectResponse.json()
+
+    const outsideProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: otherWorkspace.id, name: 'Outside' },
+    })
+    assert.equal(outsideProjectResponse.statusCode, 201)
+    const outsideProject = outsideProjectResponse.json()
+
+    const contentTaskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: firstProject.id, title: 'Review generated draft' },
+    })
+    assert.equal(contentTaskResponse.statusCode, 201)
+    const contentTask = contentTaskResponse.json()
+
+    const opsTaskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: secondProject.id, title: 'Check API aliases' },
+    })
+    assert.equal(opsTaskResponse.statusCode, 201)
+    const opsTask = opsTaskResponse.json()
+
+    const outsideTaskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: outsideProject.id, title: 'Outside workspace task' },
+    })
+    assert.equal(outsideTaskResponse.statusCode, 201)
+    const outsideTask = outsideTaskResponse.json()
+
+    const workspaceTasks = await server.inject({
+      method: 'GET',
+      url: `/api/tasks?workspaceId=${workspace.id}`,
+    })
+    assert.equal(workspaceTasks.statusCode, 200)
+    assert.deepEqual(
+      workspaceTasks.json().map((row: any) => row.id).sort(),
+      [contentTask.id, opsTask.id].sort(),
+    )
+
+    const projectTasks = await server.inject({
+      method: 'GET',
+      url: `/api/tasks?projectId=${firstProject.id}`,
+    })
+    assert.equal(projectTasks.statusCode, 200)
+    assert.deepEqual(projectTasks.json().map((row: any) => row.id), [contentTask.id])
+
+    const allTasks = await server.inject({
+      method: 'GET',
+      url: '/api/tasks',
+    })
+    assert.equal(allTasks.statusCode, 200)
+    const allTaskIds = allTasks.json().map((row: any) => row.id)
+    assert.ok(allTaskIds.includes(contentTask.id))
+    assert.ok(allTaskIds.includes(opsTask.id))
+    assert.ok(allTaskIds.includes(outsideTask.id))
+  } finally {
+    await server.close()
+  }
+})
+
+test('agent-friendly projects route supports workspaceId query', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Project Alias Workspace', slug: `project-alias-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const otherWorkspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Other Project Alias Workspace', slug: `other-project-alias-${Date.now()}` },
+    })
+    assert.equal(otherWorkspaceResponse.statusCode, 201)
+    const otherWorkspace = otherWorkspaceResponse.json()
+
+    const includedProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Included Project' },
+    })
+    assert.equal(includedProjectResponse.statusCode, 201)
+    const includedProject = includedProjectResponse.json()
+
+    const excludedProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: otherWorkspace.id, name: 'Excluded Project' },
+    })
+    assert.equal(excludedProjectResponse.statusCode, 201)
+    const excludedProject = excludedProjectResponse.json()
+
+    const projectsResponse = await server.inject({
+      method: 'GET',
+      url: `/api/projects?workspaceId=${workspace.id}`,
+    })
+    assert.equal(projectsResponse.statusCode, 200)
+    assert.deepEqual(projectsResponse.json().map((row: any) => row.id), [includedProject.id])
+    assert.equal(projectsResponse.json().some((row: any) => row.id === excludedProject.id), false)
+  } finally {
+    await server.close()
+  }
+})
+
+test('task attachments can be added, listed, and deleted as metadata', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Attachment Workspace', slug: `attachments-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const projectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Inbox' },
+    })
+    assert.equal(projectResponse.statusCode, 201)
+    const project = projectResponse.json()
+
+    const taskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: project.id, title: 'Task with attachment' },
+    })
+    assert.equal(taskResponse.statusCode, 201)
+    const task = taskResponse.json()
+
+    const created = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments`,
+      payload: {
+        name: 'Draft carousel',
+        kind: 'pdf',
+        uri: '/tmp/focusclaw-fixtures/carousel.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 12345,
+      },
+    })
+    assert.equal(created.statusCode, 201)
+    const attachment = created.json()
+    assert.equal(attachment.taskId, task.id)
+    assert.equal(attachment.name, 'Draft carousel')
+    assert.equal(attachment.kind, 'pdf')
+    assert.equal(attachment.uri, 'file:///tmp/focusclaw-fixtures/carousel.pdf')
+
+    const taskWithAttachment = await server.inject({
+      method: 'GET',
+      url: `/api/tasks/${task.id}`,
+    })
+    assert.equal(taskWithAttachment.statusCode, 200)
+    assert.equal(taskWithAttachment.json().attachmentTotal, 1)
+
+    const renamed = await server.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${task.id}/attachments/${attachment.id}`,
+      payload: { name: 'Renamed carousel' },
+    })
+    assert.equal(renamed.statusCode, 200)
+    assert.equal(renamed.json().name, 'Renamed carousel')
+    assert.equal(renamed.json().uri, 'file:///tmp/focusclaw-fixtures/carousel.pdf')
+
+    const rejectedUrl = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments`,
+      payload: {
+        name: 'Website',
+        kind: 'file',
+        uri: 'https://example.com/file.pdf',
+      },
+    })
+    assert.equal(rejectedUrl.statusCode, 400)
+
+    const rejectedUrlKind = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments`,
+      payload: {
+        name: 'Reference page',
+        kind: 'url',
+        uri: 'https://example.com/file.pdf',
+      },
+    })
+    assert.equal(rejectedUrlKind.statusCode, 400)
+
+    const rejectedPdf = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments`,
+      payload: {
+        name: 'Not a PDF',
+        kind: 'pdf',
+        uri: '/tmp/focusclaw-fixtures/photo.png',
+      },
+    })
+    assert.equal(rejectedPdf.statusCode, 400)
+
+    const blockedApp = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments`,
+      payload: {
+        name: 'Do not open',
+        kind: 'file',
+        uri: '/tmp/focusclaw-fixtures/Example.app',
+      },
+    })
+    assert.equal(blockedApp.statusCode, 201)
+    const blockedOpen = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments/${blockedApp.json().id}/open`,
+    })
+    assert.equal(blockedOpen.statusCode, 400)
+    assert.match(blockedOpen.json().error, /cannot be opened/i)
+
+    const missingOpen = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/attachments/${attachment.id}/open`,
+    })
+    assert.equal(missingOpen.statusCode, 404)
+    assert.match(missingOpen.json().error, /File not found/i)
+
+    const listed = await server.inject({
+      method: 'GET',
+      url: `/api/tasks/${task.id}/attachments`,
+    })
+    assert.equal(listed.statusCode, 200)
+    assert.deepEqual(listed.json().map((row: any) => row.id), [attachment.id, blockedApp.json().id])
+    assert.equal(listed.json()[0].name, 'Renamed carousel')
+
+    const deleted = await server.inject({
+      method: 'DELETE',
+      url: `/api/tasks/${task.id}/attachments/${attachment.id}`,
+    })
+    assert.equal(deleted.statusCode, 204)
+
+    const deletedBlockedApp = await server.inject({
+      method: 'DELETE',
+      url: `/api/tasks/${task.id}/attachments/${blockedApp.json().id}`,
+    })
+    assert.equal(deletedBlockedApp.statusCode, 204)
+
+    const remaining = await server.inject({
+      method: 'GET',
+      url: `/api/tasks/${task.id}/attachments`,
+    })
+    assert.equal(remaining.statusCode, 200)
+    assert.deepEqual(remaining.json(), [])
   } finally {
     await server.close()
   }

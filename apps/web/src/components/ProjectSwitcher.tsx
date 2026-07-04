@@ -148,7 +148,7 @@ export function ProjectSwitcher({ projects, activeProjectId, onProjectChange, on
             <button
               onClick={submitDelete}
               disabled={deleting || (deleteMode === 'moveTasks' && !targetProjectId)}
-              className="btn btn-primary text-xs bg-red-500 hover:bg-red-400"
+              className="btn bg-red-500 text-xs text-white"
             >
               {deleting ? 'Deleting...' : 'Delete Project'}
             </button>
@@ -191,7 +191,7 @@ export function ProjectSwitcher({ projects, activeProjectId, onProjectChange, on
         <button
           type="button"
           onClick={openDelete}
-          className="btn btn-ghost text-xs fc-control !w-9 !p-0 text-red-400 hover:bg-red-500/10"
+          className="btn btn-ghost text-xs fc-control !w-9 !p-0 text-red-400"
           title="Delete project"
           aria-label="Delete project"
         >

@@ -4,14 +4,15 @@
 
 ## Product Direction
 
-FocusClaw is an agent-native task manager. The first version is local-first and optimized for people and AI agents working from one shared task source of truth.
+FocusClaw is the local-first task context layer for OpenClaw, Hermes, and humans. The first version is optimized around one shared task source of truth that agents can read and update without browser automation.
 
 ## Current Scope
 
 - Web dashboard for active and completed tasks.
 - Calendar view for tasks with due dates, including completed tasks shown in a muted state.
 - Fastify REST API backed by SQLite through Drizzle ORM.
-- Plugin tools for task create, list, get, update, and complete.
+- OpenClaw plugin tools for task create, list, get, update, and complete.
+- Hermes-compatible REST API access for the same task records.
 - Workspace-wide tag definitions.
 
 ## Current API Shape

@@ -1,18 +1,20 @@
 # FocusClaw
 
-Agent-native task management for humans and AI agents.
+Task context for OpenClaw, Hermes, and humans.
 
-FocusClaw is a local-first task app and REST API backed by SQLite. It gives humans a fast web interface while giving AI agents a structured task source of truth they can read, update, and coordinate through.
+FocusClaw is a local-first task app and REST API backed by SQLite. It gives humans a fast web interface while giving OpenClaw and Hermes a structured task source of truth they can read, update, and coordinate through.
 
 ## Why FocusClaw Exists
 
 Most task tools are built for humans first. Agents can sometimes use them, but usually through brittle UI scraping, ad hoc notes, or one-off integrations.
 
+FocusClaw is the task layer for the OpenClaw workflow, with Hermes support through the same local API. The goal is simple: one durable place for projects, tasks, comments, attachments, due dates, and handoffs.
+
 FocusClaw is built around a shared task model:
 
 - Projects, tasks, subtasks, comments, tags, due dates, priorities, and owner labels
 - A web app for normal human task management
-- A REST API for OpenClaw, Hermes, scripts, and any HTTP-capable agent stack
+- OpenClaw plugin tools plus a REST API for Hermes, scripts, and any HTTP-capable agent stack
 - Local SQLite storage with snapshots and encrypted exports
 
 Owner labels such as `user`, `agent`, and `unassigned` are coordination labels only. They do not trigger background execution, scheduled runs, permissions, or autonomous workflows.
@@ -26,7 +28,7 @@ FocusClaw is in early development. The self-hosted app is usable locally, and th
 - Frontend: React 19, Vite, Tailwind CSS
 - Backend: Fastify, SQLite, Drizzle ORM
 - Storage: local SQLite database at `data/focusclaw.db`
-- Agent access: local Agent Automation API, OpenClaw plugin first, other agent platforms via HTTP
+- Agent access: OpenClaw plugin tools first, Hermes and other agent platforms through the local REST API
 - Deployment: local-first self-hosting, optional private Tailscale access
 
 ## Quick Start
@@ -50,13 +52,13 @@ The default local URLs are:
 
 `./start.sh` creates the local `data/` directory and points the API at `data/focusclaw.db`.
 
-FocusClaw includes a local Agent Automation API for trusted agents and scripts. It lets agents read projects, create tasks, update work, and mark tasks complete without controlling the browser UI. See [Agent Automation API](./docs/agent-automation-api.md) for the technical contract. For Hermes-specific setup guidance, see [Hermes Integration](./docs/hermes-integration.md).
+FocusClaw includes a local Agent Automation API for trusted agents and scripts. It lets OpenClaw, Hermes, and other local tools read projects, create tasks, update work, and mark tasks complete without controlling the browser UI. See [Agent Automation API](./docs/agent-automation-api.md) for the technical contract. For Hermes-specific setup guidance, see [Hermes Integration](./docs/hermes-integration.md).
 
 ## Common Workflows
 
 ### Agent + Integration Usage
 
-FocusClaw supports simple read-only plain-text status commands through any connected agent or messaging integration. Slash commands are not required for the MVP.
+FocusClaw supports simple read-only plain-text status commands through OpenClaw, Hermes, or any connected messaging integration. Slash commands are not required for the MVP.
 
 Use these plain-text triggers for quick status:
 
@@ -74,13 +76,13 @@ Add, edit, delete, and complete actions stay as agent tool actions using natural
 - `Mark the onboarding checklist complete.`
 - `Delete the task about drafting the first content batch.`
 
-Agents should find tasks by title/project before asking users for task IDs.
+OpenClaw and Hermes should find tasks by title/project before asking users for task IDs.
 
 ### Projects And Tasks
 
 Create projects, add tasks, set priority, choose due dates, assign owner labels, and mark work complete from the web app.
 
-Agents can work with the same records through the local Agent Automation API. This keeps human task planning and agent execution context in one structured place.
+OpenClaw and Hermes can work with the same records through the local Agent Automation API. This keeps human task planning and agent execution context in one structured place.
 
 ### Universal Tags
 
@@ -94,7 +96,13 @@ The calendar view shows tasks with due dates and can optionally include complete
 
 ### Comments And Subtasks
 
-Open a task to edit details, add comments, and create subtasks. Comments keep discussion and handoff context attached to the task record so humans and agents can read the same history.
+Open a task to edit details, add comments, and create subtasks. Comments keep discussion and handoff context attached to the task record so humans, OpenClaw, and Hermes can read the same history.
+
+### Descriptions And Attachments
+
+Task descriptions use a simple Live/Code editor. Live is the default editable rendered view; Code shows the raw Markdown for agents and developers.
+
+Task attachments are local references only. Use **Select a file** in task details to attach a local file; FocusClaw stores metadata and the local file path, infers file/image/PDF type, and opens the original file through the local API. FocusClaw does not upload, copy, host, or delete attached files. URL attachments are intentionally not supported.
 
 ### CSV Export
 
@@ -104,7 +112,7 @@ Use **Settings -> Tasks Export** to download a CSV of all tasks across all proje
 
 Use **Settings -> Local Snapshots & Encrypted Exports** to create local snapshots, schedule automatic daily snapshots, restore a snapshot, or download an encrypted backup file.
 
-Local snapshots are stored at `~/.focusclaw/backups`. Encrypted exports require a passphrase of at least 6 characters. Restores and imports create a safety backup before replacing the current workspace data.
+Local snapshots are stored at `~/.focusclaw/backups`. Encrypted exports require a passphrase of at least 12 characters. Restores and imports create a safety backup before replacing the current workspace data.
 
 ## Advanced: Private Tailscale Access
 
@@ -215,10 +223,13 @@ CORS_ORIGINS=https://<HOST_TAILSCALE_DNS_NAME>:8443,http://localhost:5173,http:/
 
 If `CORS_ORIGINS` is unset, the API allows the local app origins and any configured `FOCUSCLAW_PUBLIC_URL` or `VITE_PRIVATE_APP_URL`. Set `CORS_ORIGINS` explicitly when a browser app calls the API from another origin.
 
+If `API_HOST` is not a loopback host (`127.0.0.1`, `localhost`, or `::1`), `API_KEY` is required. This prevents accidentally exposing a local-control API without authentication.
+
 ## Troubleshooting
 
 - **Port already in use:** change `PORT` for the API or `VITE_DEV_PORT` for the web app.
 - **API unreachable:** confirm `./start.sh` is still running, then open `http://127.0.0.1:3001/health`.
+- **API fails to start with non-loopback host:** set `API_KEY` or bind `API_HOST` back to a loopback host.
 - **401 errors:** if `API_KEY` is set on the API, agents and scripts must send the matching value as `x-api-key`. See [Agent Automation API](./docs/agent-automation-api.md).
 - **Linux Rollup optional dependency errors:** remove `node_modules` and run `npm install` again so platform-specific optional packages are installed.
 - **`npm ci` fails after dependency edits:** use `npm install` for local development, then commit the updated lockfile when changes are ready.

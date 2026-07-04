@@ -1,12 +1,24 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import { execFile } from 'node:child_process'
+import { access, stat } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { platform } from 'node:os'
+import { basename, extname } from 'node:path'
+import { promisify } from 'node:util'
 import { db } from '../db'
-import { tasks, statusDefinitions, activityLog, projects, workspaces } from '../db/schema'
+import { tasks, statusDefinitions, activityLog, projects, workspaces, taskAttachments } from '../db/schema'
 import { eq, asc, desc, and, isNull, inArray } from 'drizzle-orm'
 import { hydrateTaskWithTags, hydrateTasksWithTags, replaceTaskTags } from '../lib/taskTags'
 
+const execFileAsync = promisify(execFile)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COMMENT_MAX_LENGTH = 1000
-const DESCRIPTION_MAX_LENGTH = 5000
+const DESCRIPTION_MAX_LENGTH = 10000
+const ATTACHMENT_NAME_MAX_LENGTH = 200
+const ATTACHMENT_URI_MAX_LENGTH = 2000
+const ATTACHMENT_KINDS = new Set(['file', 'image', 'pdf', 'folder'])
+const IMAGE_EXTENSIONS = new Set(['.apng', '.avif', '.gif', '.heic', '.jpeg', '.jpg', '.png', '.svg', '.webp'])
+const BLOCKED_OPEN_EXTENSIONS = new Set(['.app', '.command', '.scpt', '.terminal', '.workflow'])
 
 type SearchableTask = {
   id: string
@@ -14,6 +26,14 @@ type SearchableTask = {
   title: string
   description: string | null
   tags?: Array<{ name: string }>
+}
+
+type TaskListQuery = {
+  sort?: 'priority' | 'dueDate' | 'createdAt'
+  order?: 'asc' | 'desc'
+  filter?: 'all' | 'dueToday' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
+  includeArchived?: string
+  q?: string
 }
 
 function isValidUUID(s: string): boolean {
@@ -41,8 +61,152 @@ function addSubtaskCounts<T extends { id: string }>(taskRows: T[], allProjectTas
   })
 }
 
+async function addAttachmentCounts<T extends { id: string }>(taskRows: T[]): Promise<Array<T & { attachmentTotal: number }>> {
+  const taskIds = taskRows.map((task) => task.id)
+  if (taskIds.length === 0) return taskRows.map((task) => ({ ...task, attachmentTotal: 0 }))
+
+  const attachmentRows = await db.select({ taskId: taskAttachments.taskId }).from(taskAttachments)
+    .where(inArray(taskAttachments.taskId, taskIds))
+  const counts = new Map<string, number>()
+
+  for (const attachment of attachmentRows) {
+    counts.set(attachment.taskId, (counts.get(attachment.taskId) || 0) + 1)
+  }
+
+  return taskRows.map((task) => ({
+    ...task,
+    attachmentTotal: counts.get(task.id) || 0,
+  }))
+}
+
 function isTooLong(value: string | undefined, maxLength: number): boolean {
   return value !== undefined && value.length > maxLength
+}
+
+function normalizeAttachmentKind(kind: string | undefined): string {
+  const normalized = kind?.trim().toLowerCase() || 'file'
+  return ATTACHMENT_KINDS.has(normalized) ? normalized : 'file'
+}
+
+function isSupportedAttachmentKind(kind: string | undefined): boolean {
+  if (!kind) return true
+  return ATTACHMENT_KINDS.has(kind.trim().toLowerCase())
+}
+
+function localPathToFileUri(localPath: string): string {
+  return `file://${localPath.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function inferAttachmentKind(localPath: string, requestedKind?: string): string {
+  const normalized = normalizeAttachmentKind(requestedKind)
+  if (localPath.endsWith('/')) return 'folder'
+  if (normalized === 'folder') return 'folder'
+  const extension = extname(localPath).toLowerCase()
+  if (extension === '.pdf') return 'pdf'
+  if (IMAGE_EXTENSIONS.has(extension)) return 'image'
+  return normalized
+}
+
+function normalizeAttachmentUri(uri: string, kind?: string): string {
+  const normalizedKind = normalizeAttachmentKind(kind)
+  if (normalizedKind !== 'folder' && uri.startsWith('/')) return localPathToFileUri(uri)
+  if (normalizedKind === 'folder' && uri.startsWith('/')) return localPathToFileUri(uri.replace(/\/$/, ''))
+  return uri
+}
+
+function attachmentPathExtension(uri: string): string {
+  let path = uri
+  if (uri.startsWith('file://')) {
+    try {
+      path = decodeURIComponent(new URL(uri).pathname)
+    } catch {
+      return ''
+    }
+  }
+  return extname(path).toLowerCase()
+}
+
+function attachmentUriToLocalPath(uri: string): string | null {
+  if (!uri.startsWith('file://')) return null
+  try {
+    return decodeURIComponent(new URL(uri).pathname)
+  } catch {
+    return null
+  }
+}
+
+function validateAttachmentReference(kind: string, uri: string): string | null {
+  if (!uri.startsWith('file://')) return 'Attachments must reference a local file or folder'
+
+  const extension = attachmentPathExtension(uri)
+  if (kind === 'pdf' && extension !== '.pdf') return 'PDF attachments must be .pdf files'
+  if (kind === 'image' && !IMAGE_EXTENSIONS.has(extension)) return 'Image attachments must be an image file'
+  return null
+}
+
+async function openLocalAttachment(uri: string) {
+  const localPath = attachmentUriToLocalPath(uri)
+  if (!localPath) throw new Error('Attachment is not a local file or folder')
+  const extension = extname(localPath.replace(/\/$/, '')).toLowerCase()
+  if (BLOCKED_OPEN_EXTENSIONS.has(extension)) {
+    const error = new Error('This attachment type cannot be opened from FocusClaw.')
+    ;(error as Error & { statusCode?: number }).statusCode = 400
+    throw error
+  }
+
+  let fileStat
+  try {
+    await access(localPath)
+    fileStat = await stat(localPath)
+  } catch {
+    const error = new Error('File not found. It may have been moved or deleted.')
+    ;(error as Error & { statusCode?: number }).statusCode = 404
+    throw error
+  }
+
+  if (fileStat.isFile()) {
+    try {
+      await access(localPath, fsConstants.X_OK)
+      const error = new Error('Executable attachments cannot be opened from FocusClaw.')
+      ;(error as Error & { statusCode?: number }).statusCode = 400
+      throw error
+    } catch (error) {
+      if (error instanceof Error && 'statusCode' in error) throw error
+    }
+  }
+
+  if (platform() !== 'darwin') {
+    throw new Error('Opening local attachments is currently available on macOS only')
+  }
+
+  await execFileAsync('open', [localPath], { timeout: 15000 })
+}
+
+async function pickLocalAttachment(kind?: string) {
+  if (platform() !== 'darwin') {
+    throw new Error('Local file picking is currently available on macOS only')
+  }
+
+  const requestedKind = kind?.trim().toLowerCase()
+  const normalizedKind = normalizeAttachmentKind(kind)
+  const script = !requestedKind
+    ? 'POSIX path of (choose file with prompt "Choose a file to attach to FocusClaw")'
+    : normalizedKind === 'folder'
+    ? 'POSIX path of (choose folder with prompt "Choose a folder to attach to FocusClaw")'
+    : normalizedKind === 'pdf'
+      ? 'POSIX path of (choose file with prompt "Choose a PDF to attach to FocusClaw" of type {"com.adobe.pdf", "PDF"})'
+      : normalizedKind === 'image'
+        ? 'POSIX path of (choose file with prompt "Choose an image to attach to FocusClaw" of type {"public.image"})'
+        : 'POSIX path of (choose file with prompt "Choose a file to attach to FocusClaw")'
+  const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 120000 })
+  const localPath = stdout.trim()
+  if (!localPath) return null
+
+  return {
+    name: basename(localPath.replace(/\/$/, '')) || localPath,
+    kind: inferAttachmentKind(localPath, normalizedKind),
+    uri: localPathToFileUri(localPath),
+  }
 }
 
 function localDateKey(date = new Date()): string {
@@ -306,7 +470,120 @@ export async function taskRoutes(fastify: FastifyInstance) {
       ...task,
       tags: canonicalTags,
       labels: JSON.stringify(canonicalTags.map((tag) => tag.name)),
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      attachmentTotal: 0,
     })
+  })
+
+  async function listTasksForProjects(projectIds: string[], projectNameById: Map<string, string>, query: TaskListQuery) {
+    if (projectIds.length === 0) return []
+
+    const { sort, order, filter, includeArchived, q } = query
+    const sortField = sort === 'dueDate' ? tasks.dueDate : sort === 'createdAt' ? tasks.createdAt : tasks.priority
+    const sortDirection = order === 'desc' ? desc(sortField) : asc(sortField)
+
+    const allProjectTasks = await db.select().from(tasks)
+      .where(inArray(tasks.projectId, projectIds))
+      .orderBy(asc(tasks.projectId), asc(tasks.archived), sortDirection)
+    let result = allProjectTasks
+    const hydratedProjectTasks = hydrateTasksWithTags(allProjectTasks)
+    const hydratedTaskById = new Map(hydratedProjectTasks.map((task) => [task.id, task]))
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayKey = localDateKey(today)
+    const nextWeek = new Date(today)
+    nextWeek.setDate(nextWeek.getDate() + 7)
+    const nextWeekKey = localDateKey(nextWeek)
+    const nextCalendarWeekStart = startOfNextMondayFirstWeek(today)
+    const nextCalendarWeekEnd = new Date(nextCalendarWeekStart)
+    nextCalendarWeekEnd.setDate(nextCalendarWeekEnd.getDate() + 7)
+    const nextCalendarWeekStartKey = localDateKey(nextCalendarWeekStart)
+    const nextCalendarWeekEndKey = localDateKey(nextCalendarWeekEnd)
+    const shouldIncludeArchived = includeArchived === 'true'
+    const isVisibleForDateFilter = (task: typeof result[number]) => shouldIncludeArchived || !task.archived
+
+    if (filter === 'dueToday') {
+      result = result.filter(t => isVisibleForDateFilter(t) && taskDueDateKey(t.dueDate) === todayKey)
+    } else if (filter === 'dueThisWeek') {
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= todayKey && dueKey < nextWeekKey
+      })
+    } else if (filter === 'dueNextWeek') {
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= nextCalendarWeekStartKey && dueKey < nextCalendarWeekEndKey
+      })
+    } else if (filter === 'pastDue') {
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey < todayKey
+      })
+    } else if (filter === 'noDate') {
+      result = result.filter(t => (shouldIncludeArchived || !t.archived) && !t.dueDate)
+    } else if (filter === 'archived') {
+      result = result.filter(t => t.archived)
+    } else if (!shouldIncludeArchived) {
+      result = result.filter(t => !t.archived)
+    }
+
+    const searchQuery = q?.trim().toLowerCase()
+    if (searchQuery) {
+      const taskIds = allProjectTasks.map((task) => task.id)
+      const commentRows = taskIds.length > 0
+        ? await db.select().from(activityLog).where(and(inArray(activityLog.taskId, taskIds), eq(activityLog.action, 'comment')))
+        : []
+      const commentsByTaskId = new Map<string, string[]>()
+      for (const row of commentRows) {
+        const content = readActivityChanges(row.changes).content
+        if (typeof content !== 'string') continue
+        const current = commentsByTaskId.get(row.taskId) || []
+        current.push(content)
+        commentsByTaskId.set(row.taskId, current)
+      }
+
+      const subtasksByParentId = new Map<string, SearchableTask[]>()
+      for (const task of hydratedProjectTasks) {
+        if (!task.parentId) continue
+        const current = subtasksByParentId.get(task.parentId) || []
+        current.push(task)
+        subtasksByParentId.set(task.parentId, current)
+      }
+
+      result = result.filter((task) => {
+        const hydratedTask = hydratedTaskById.get(task.id)
+        return hydratedTask
+          ? taskMatchesSearch(hydratedTask, searchQuery, projectNameById.get(task.projectId) || '', commentsByTaskId, subtasksByParentId)
+          : false
+      })
+    }
+
+    return addAttachmentCounts(addSubtaskCounts(hydrateTasksWithTags(result), allProjectTasks))
+  }
+
+  // List tasks across all projects, a workspace, or a single project.
+  fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { projectId, workspaceId, ...query } = request.query as TaskListQuery & {
+      projectId?: string
+      workspaceId?: string
+    }
+
+    if (projectId) {
+      if (!isValidUUID(projectId)) return reply.send([])
+      const projectRows = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
+      if (projectRows.length === 0) return reply.send([])
+      return reply.send(await listTasksForProjects([projectId], new Map([[projectId, projectRows[0].name]]), query))
+    }
+
+    const projectRows = workspaceId
+      ? await db.select().from(projects).where(eq(projects.workspaceId, workspaceId)).orderBy(asc(projects.createdAt))
+      : await db.select().from(projects).orderBy(asc(projects.createdAt))
+    const projectIds = projectRows.map((project) => project.id)
+    const projectNameById = new Map(projectRows.map((project) => [project.id, project.name]))
+
+    return reply.send(await listTasksForProjects(projectIds, projectNameById, query))
   })
 
   // List tasks by project
@@ -416,8 +693,164 @@ export async function taskRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const hydrated = addSubtaskCounts(hydrateTasksWithTags(result), allProjectTasks)
+    const hydrated = await addAttachmentCounts(addSubtaskCounts(hydrateTasksWithTags(result), allProjectTasks))
     return reply.send(hydrated)
+  })
+
+  fastify.post('/attachments/pick-local', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { kind } = (request.body ?? {}) as { kind?: string }
+    try {
+      const picked = await pickLocalAttachment(kind)
+      if (!picked) return reply.status(204).send()
+      return reply.send(picked)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not open the local file picker'
+      if (/user canceled/i.test(message)) return reply.status(204).send()
+      return reply.status(501).send({ error: message })
+    }
+  })
+
+  // List attachment metadata for a task. Files are not uploaded into FocusClaw.
+  fastify.get('/:id/attachments', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    if (!isValidUUID(id)) return reply.status(400).send({ error: 'Invalid task ID' })
+
+    const existingTask = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, id)).limit(1)
+    if (existingTask.length === 0) return reply.status(404).send({ error: 'Task not found' })
+
+    const result = await db.select().from(taskAttachments)
+      .where(eq(taskAttachments.taskId, id))
+      .orderBy(asc(taskAttachments.createdAt))
+
+    return reply.send(result)
+  })
+
+  // Add attachment metadata for a task.
+  fastify.post('/:id/attachments', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const { name, kind, uri, mimeType, sizeBytes } = request.body as {
+      name?: string
+      kind?: string
+      uri?: string
+      mimeType?: string | null
+      sizeBytes?: number | null
+    }
+    if (!isValidUUID(id)) return reply.status(400).send({ error: 'Invalid task ID' })
+
+    const existingTask = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, id)).limit(1)
+    if (existingTask.length === 0) return reply.status(404).send({ error: 'Task not found' })
+
+    const nextName = name?.trim()
+    if (!isSupportedAttachmentKind(kind)) {
+      return reply.status(400).send({ error: 'Attachment type must be file, image, PDF, or folder' })
+    }
+    const nextUri = uri ? normalizeAttachmentUri(uri.trim(), kind) : undefined
+    if (!nextName || !nextUri) return reply.status(400).send({ error: 'Attachment name and local path are required' })
+    if (nextName.length > ATTACHMENT_NAME_MAX_LENGTH) {
+      return reply.status(400).send({ error: `Attachment name must be ${ATTACHMENT_NAME_MAX_LENGTH} chars or less` })
+    }
+    if (nextUri.length > ATTACHMENT_URI_MAX_LENGTH) {
+      return reply.status(400).send({ error: `Attachment path must be ${ATTACHMENT_URI_MAX_LENGTH} chars or less` })
+    }
+    const nextKind = normalizeAttachmentKind(kind)
+    const attachmentError = validateAttachmentReference(nextKind, nextUri)
+    if (attachmentError) {
+      return reply.status(400).send({ error: attachmentError })
+    }
+    if (sizeBytes !== undefined && sizeBytes !== null && (!Number.isFinite(sizeBytes) || sizeBytes < 0)) {
+      return reply.status(400).send({ error: 'Attachment size must be a positive number' })
+    }
+
+    const [attachment] = await db.insert(taskAttachments).values({
+      taskId: id,
+      name: nextName,
+      kind: nextKind,
+      uri: nextUri,
+      mimeType: mimeType?.trim() || null,
+      sizeBytes: sizeBytes ?? null,
+    }).returning()
+
+    await db.insert(activityLog).values({
+      taskId: id,
+      action: 'attachment_added',
+      changes: JSON.stringify({ attachmentId: attachment.id, name: attachment.name, kind: attachment.kind }),
+    })
+
+    return reply.status(201).send(attachment)
+  })
+
+  // Rename attachment metadata. The original file path is intentionally immutable.
+  fastify.patch('/:id/attachments/:attachmentId', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id, attachmentId } = request.params as { id: string; attachmentId: string }
+    const { name } = request.body as { name?: string }
+    if (!isValidUUID(id) || !isValidUUID(attachmentId)) return reply.status(400).send({ error: 'Invalid attachment ID' })
+
+    const nextName = name?.trim()
+    if (!nextName) return reply.status(400).send({ error: 'Attachment name is required' })
+    if (nextName.length > ATTACHMENT_NAME_MAX_LENGTH) {
+      return reply.status(400).send({ error: `Attachment name must be ${ATTACHMENT_NAME_MAX_LENGTH} chars or less` })
+    }
+
+    const existing = await db.select().from(taskAttachments)
+      .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, id)))
+      .limit(1)
+    if (existing.length === 0) return reply.status(404).send({ error: 'Attachment not found' })
+
+    const [attachment] = await db.update(taskAttachments)
+      .set({ name: nextName })
+      .where(eq(taskAttachments.id, attachmentId))
+      .returning()
+
+    await db.insert(activityLog).values({
+      taskId: id,
+      action: 'attachment_renamed',
+      changes: JSON.stringify({ attachmentId, from: existing[0].name, to: attachment.name }),
+    })
+
+    return reply.send(attachment)
+  })
+
+  // Open an attachment on the local machine running the FocusClaw API.
+  fastify.post('/:id/attachments/:attachmentId/open', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id, attachmentId } = request.params as { id: string; attachmentId: string }
+    if (!isValidUUID(id) || !isValidUUID(attachmentId)) return reply.status(400).send({ error: 'Invalid attachment ID' })
+
+    const existing = await db.select().from(taskAttachments)
+      .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, id)))
+      .limit(1)
+    if (existing.length === 0) return reply.status(404).send({ error: 'Attachment not found' })
+
+    try {
+      await openLocalAttachment(existing[0].uri)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not open attachment'
+      const statusCode = error && typeof error === 'object' && 'statusCode' in error && typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? (error as { statusCode: number }).statusCode
+        : 501
+      return reply.status(statusCode).send({ error: message })
+    }
+
+    return reply.status(204).send()
+  })
+
+  // Delete attachment metadata from a task. The referenced file or folder is not deleted.
+  fastify.delete('/:id/attachments/:attachmentId', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id, attachmentId } = request.params as { id: string; attachmentId: string }
+    if (!isValidUUID(id) || !isValidUUID(attachmentId)) return reply.status(400).send({ error: 'Invalid attachment ID' })
+
+    const existing = await db.select().from(taskAttachments)
+      .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, id)))
+      .limit(1)
+    if (existing.length === 0) return reply.status(404).send({ error: 'Attachment not found' })
+
+    await db.delete(taskAttachments).where(eq(taskAttachments.id, attachmentId))
+    await db.insert(activityLog).values({
+      taskId: id,
+      action: 'attachment_deleted',
+      changes: JSON.stringify({ attachmentId, name: existing[0].name }),
+    })
+
+    return reply.status(204).send()
   })
 
   // Get single task
@@ -430,7 +863,8 @@ export async function taskRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Task not found' })
     }
 
-    return reply.send(hydrateTaskWithTags(result[0]))
+    const [task] = await addAttachmentCounts(addSubtaskCounts([hydrateTaskWithTags(result[0])], result))
+    return reply.send(task)
   })
 
   // Update task
@@ -498,7 +932,9 @@ export async function taskRoutes(fastify: FastifyInstance) {
       changes: JSON.stringify(updates)
     })
 
-    return reply.send(hydrateTaskWithTags(result[0]))
+    const allProjectTasks = await db.select().from(tasks).where(eq(tasks.projectId, result[0].projectId))
+    const [task] = await addAttachmentCounts(addSubtaskCounts([hydrateTaskWithTags(result[0])], allProjectTasks))
+    return reply.send(task)
   })
 
   // Delete task permanently. Completion is handled by POST /:id/complete.

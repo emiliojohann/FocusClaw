@@ -1,9 +1,11 @@
 import {
   Check, CalendarDays, X, Bot, User, Plus,
-  MessageSquare, Send, BarChart3, Trash2, Pencil, Save
+  MessageSquare, Send, BarChart3, Trash2, Pencil, Save,
+  Paperclip, ExternalLink, FileText, Image, Folder, File, AlertTriangle
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { DatePicker } from './DatePicker'
+import { DescriptionEditor } from './DescriptionEditor'
 import { TagsEditor } from './TagsEditor'
 import {
   ASSIGNEE_OPTIONS,
@@ -34,6 +36,17 @@ interface Subtask {
   createdAt: string
 }
 
+interface AttachmentEntry {
+  id: string
+  taskId: string
+  name: string
+  kind: 'file' | 'image' | 'pdf' | 'folder' | string
+  uri: string
+  mimeType?: string | null
+  sizeBytes?: number | null
+  createdAt: string
+}
+
 const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: string; bgColor: string; borderColor: string; activeTextColor: string }> = {
   1: { label: 'Critical', badge: 'badge-critical', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.2)', activeTextColor: '#ffffff' },
   2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.2)', activeTextColor: '#18181b' },
@@ -41,7 +54,6 @@ const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: str
   4: { label: 'Low', badge: 'badge-low', color: '#71717a', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', activeTextColor: '#ffffff' },
 }
 const COMMENT_MAX_LENGTH = 1000
-const DESCRIPTION_MAX_LENGTH = 5000
 
 interface TaskPanelProps {
   // Panel state
@@ -60,8 +72,12 @@ interface TaskPanelProps {
   // Comments & subtasks
   comments: CommentEntry[]
   subtasks: Subtask[]
+  attachments: AttachmentEntry[]
   newComment: string
+  newAttachmentName: string
+  newAttachmentUri: string
   submittingComment: boolean
+  addingAttachment: boolean
   showSubtaskForm: boolean
   newSubtaskTitle: string
   newSubtaskPriority: number
@@ -77,6 +93,7 @@ interface TaskPanelProps {
   setEditRecurring: (v: string) => void
   setEditTags: (v: string[]) => void
   setNewComment: (v: string) => void
+  setNewAttachmentUri: (v: string) => void
   setShowSubtaskForm: (v: boolean) => void
   setNewSubtaskTitle: (v: string) => void
   setNewSubtaskPriority: (v: number) => void
@@ -90,6 +107,11 @@ interface TaskPanelProps {
   onUpdateSubtask?: (subtaskId: string, updates: Partial<{ title: string; priority: number; archived: boolean }>) => Promise<void> | void
   onDeleteSubtask?: (subtaskId: string) => void
   onAddComment: () => void
+  onAddAttachment: () => void
+  onPickLocalAttachment?: () => Promise<void> | void
+  onOpenAttachment?: (attachmentId: string) => Promise<void> | void
+  onUpdateAttachmentName?: (attachmentId: string, name: string) => Promise<void> | void
+  onDeleteAttachment?: (attachmentId: string) => Promise<void> | void
   onUpdateComment?: (commentId: string, content: string) => Promise<void> | void
   onDeleteComment?: (commentId: string) => Promise<void> | void
   
@@ -161,6 +183,17 @@ function linkifyCommentText(content: string): ReactNode[] {
   return nodes
 }
 
+function attachmentIcon(kind: string) {
+  if (kind === 'image') return Image
+  if (kind === 'pdf') return FileText
+  if (kind === 'folder') return Folder
+  return File
+}
+
+function canOpenAttachment(uri: string): boolean {
+  return /^file:\/\//i.test(uri)
+}
+
 export function TaskPanel({
   selectedTask,
   panelLoading,
@@ -175,8 +208,12 @@ export function TaskPanel({
   saving,
   comments,
   subtasks,
+  attachments,
   newComment,
+  newAttachmentName,
+  newAttachmentUri,
   submittingComment,
+  addingAttachment,
   showSubtaskForm,
   newSubtaskTitle,
   newSubtaskPriority,
@@ -201,6 +238,11 @@ export function TaskPanel({
   onUpdateSubtask,
   onDeleteSubtask,
   onAddComment,
+  onAddAttachment,
+  onPickLocalAttachment,
+  onOpenAttachment,
+  onUpdateAttachmentName,
+  onDeleteAttachment,
   onUpdateComment,
   onDeleteComment,
   projectId,
@@ -218,6 +260,12 @@ export function TaskPanel({
   const [editingCommentContent, setEditingCommentContent] = useState('')
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null)
   const [commentPendingDelete, setCommentPendingDelete] = useState<CommentEntry | null>(null)
+  const [attachmentPendingDelete, setAttachmentPendingDelete] = useState<AttachmentEntry | null>(null)
+  const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null)
+  const [editingAttachmentName, setEditingAttachmentName] = useState('')
+  const [savingAttachmentId, setSavingAttachmentId] = useState<string | null>(null)
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null)
+  const [attachmentError, setAttachmentError] = useState<{ title: string; message: string } | null>(null)
   const IconComponent = icon === 'calendar' ? CalendarDays : Check
   const selectedDueDate = dueDateToLocalDateKey(selectedTask?.dueDate)
   const selectedLabels = readTaskLabels(selectedTask)
@@ -239,6 +287,13 @@ export function TaskPanel({
     }
     onClose()
   }
+
+  useEffect(() => {
+    setAttachmentPendingDelete(null)
+    setAttachmentError(null)
+    setEditingAttachmentId(null)
+    setEditingAttachmentName('')
+  }, [selectedTask?.id])
 
   const startEditingSubtask = (subtask: Subtask) => {
     setEditingSubtaskId(subtask.id)
@@ -284,6 +339,56 @@ export function TaskPanel({
       cancelEditingComment()
     } finally {
       setSavingCommentId(null)
+    }
+  }
+
+  const startEditingAttachmentName = (attachment: AttachmentEntry) => {
+    setEditingAttachmentId(attachment.id)
+    setEditingAttachmentName(attachment.name)
+  }
+
+  const cancelEditingAttachmentName = () => {
+    setEditingAttachmentId(null)
+    setEditingAttachmentName('')
+  }
+
+  const saveEditingAttachmentName = async () => {
+    if (!editingAttachmentId || !editingAttachmentName.trim() || !onUpdateAttachmentName) return
+    setSavingAttachmentId(editingAttachmentId)
+    try {
+      await onUpdateAttachmentName(editingAttachmentId, editingAttachmentName.trim())
+      cancelEditingAttachmentName()
+    } finally {
+      setSavingAttachmentId(null)
+    }
+  }
+
+  const openAttachment = async (attachment: AttachmentEntry) => {
+    if (openingAttachmentId) return
+    if (!onOpenAttachment) return
+    setOpeningAttachmentId(attachment.id)
+    try {
+      await onOpenAttachment(attachment.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not open attachment'
+      setAttachmentError({
+        title: message.toLowerCase().includes('not found') ? 'File not found' : 'Could not open attachment',
+        message,
+      })
+    } finally {
+      setOpeningAttachmentId(null)
+    }
+  }
+
+  const selectLocalAttachment = async () => {
+    if (!onPickLocalAttachment || addingAttachment) return
+    try {
+      await onPickLocalAttachment()
+    } catch (error) {
+      setAttachmentError({
+        title: 'Could not select file',
+        message: error instanceof Error ? error.message : 'Could not open the local file picker',
+      })
     }
   }
 
@@ -353,23 +458,7 @@ export function TaskPanel({
               </div>
 
               {/* Description */}
-              <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Description</label>
-                <textarea
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  maxLength={DESCRIPTION_MAX_LENGTH}
-                  rows={3}
-                  className="input resize-none"
-                  placeholder="Add a description..."
-                />
-                <div
-                  className={`mt-1 w-full text-right text-[10px] leading-none ${editDescription.length > DESCRIPTION_MAX_LENGTH * 0.9 ? 'text-amber-300' : 'text-zinc-400'}`}
-                  aria-live="polite"
-                >
-                  {editDescription.length}/{DESCRIPTION_MAX_LENGTH}
-                </div>
-              </div>
+              <DescriptionEditor value={editDescription} onChange={setEditDescription} />
 
               {/* Assignee */}
               <div>
@@ -478,6 +567,152 @@ export function TaskPanel({
                 <TagsEditor labels={editTags} onChange={setEditTags} projectId={projectId} />
               </div>
 
+              {/* Attachments */}
+              <div className="pt-2 border-t border-[var(--border)]">
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-3 block">
+                  <Paperclip className="w-3 h-3 inline mr-1" />
+                  Attachments
+                </label>
+                <div className="space-y-2">
+                  {attachments.length === 0 ? (
+                    <p className="text-zinc-600 text-xs text-center py-3">No attachments</p>
+                  ) : (
+                    attachments.map((attachment) => {
+                      const Icon = attachmentIcon(attachment.kind)
+                      const isEditingAttachment = editingAttachmentId === attachment.id
+                      const canOpen = !!onOpenAttachment || canOpenAttachment(attachment.uri)
+                      return (
+                        <div key={attachment.id} className="flex items-center gap-2 rounded-xl bg-[var(--bg-elevated)] p-2">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-subtle)] text-[var(--accent)]">
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {isEditingAttachment ? (
+                              <input
+                                type="text"
+                                value={editingAttachmentName}
+                                onChange={(e) => setEditingAttachmentName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    void saveEditingAttachmentName()
+                                  }
+                                  if (e.key === 'Escape') cancelEditingAttachmentName()
+                                }}
+                                className="input h-8 text-xs"
+                                autoFocus
+                              />
+                            ) : (
+                              <p className="truncate text-xs font-medium text-[var(--text-primary)]">{attachment.name}</p>
+                            )}
+                            <p className="truncate text-[10px] text-[var(--text-muted)]">{attachment.uri}</p>
+                          </div>
+                          {isEditingAttachment ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void saveEditingAttachmentName()}
+                                disabled={savingAttachmentId === attachment.id || !editingAttachmentName.trim()}
+                                className="btn btn-ghost !h-8 !w-8 !p-0 text-zinc-400 hover:text-[var(--accent)]"
+                                title="Save attachment name"
+                                aria-label={`Save attachment name ${attachment.name}`}
+                              >
+                                <Save className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelEditingAttachmentName}
+                                className="btn btn-ghost !h-8 !w-8 !p-0 text-zinc-500 hover:text-zinc-300"
+                                title="Cancel rename"
+                                aria-label={`Cancel renaming ${attachment.name}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {canOpen ? (
+                                onOpenAttachment ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void openAttachment(attachment)}
+                                    disabled={openingAttachmentId === attachment.id}
+                                    className="btn btn-ghost !h-8 !w-8 !p-0 text-zinc-400 hover:text-[var(--accent)]"
+                                    title="Open attachment"
+                                    aria-label={`Open ${attachment.name}`}
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </button>
+                                ) : (
+                                  <a
+                                    href={attachment.uri}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="btn btn-ghost !h-8 !w-8 !p-0 text-zinc-400 hover:text-[var(--accent)]"
+                                    title="Open attachment"
+                                    aria-label={`Open ${attachment.name}`}
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </a>
+                                )
+                              ) : null}
+                              {onUpdateAttachmentName ? (
+                                <button
+                                  type="button"
+                                  onClick={() => startEditingAttachmentName(attachment)}
+                                  className="btn btn-ghost !h-8 !w-8 !p-0 text-zinc-500 hover:text-zinc-300"
+                                  title="Rename attachment"
+                                  aria-label={`Rename ${attachment.name}`}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              ) : null}
+                            </>
+                          )}
+                          {onDeleteAttachment ? (
+                            <button
+                              type="button"
+                              onClick={() => setAttachmentPendingDelete(attachment)}
+                              className="btn btn-ghost !h-8 !w-8 !p-0 text-zinc-500 hover:text-red-400"
+                              title="Remove attachment"
+                              aria-label={`Remove ${attachment.name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+                <div className="mt-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {onPickLocalAttachment ? (
+                      <button
+                        type="button"
+                        onClick={() => void selectLocalAttachment()}
+                        disabled={addingAttachment}
+                        className="btn btn-secondary w-full justify-center text-xs"
+                        title="Select a local file or folder"
+                      >
+                        <File className="h-3.5 w-3.5" />
+                        Select a file
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onAddAttachment}
+                      disabled={addingAttachment || !newAttachmentName.trim() || !newAttachmentUri.trim()}
+                      className="btn btn-primary w-full justify-center text-xs"
+                      title="Add attachment"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Save Button */}
               <button
                 onClick={onSave}
@@ -496,7 +731,7 @@ export function TaskPanel({
               {showDelete && onDelete ? (
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Danger Zone</span>
-                  <button onClick={onDelete} className="btn btn-ghost text-xs text-red-400 hover:bg-red-500/10 px-3 py-1.5">
+                  <button onClick={onDelete} className="btn btn-ghost text-xs text-red-400 px-3 py-1.5">
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete Task
                   </button>
@@ -653,7 +888,7 @@ export function TaskPanel({
                             <button
                               type="button"
                               onClick={() => setSubtaskPendingDelete(st)}
-                              className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                              className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-red-400"
                               title="Delete subtask"
                               aria-label={`Delete subtask ${st.title}`}
                             >
@@ -724,7 +959,7 @@ export function TaskPanel({
                                   <button
                                     type="button"
                                     onClick={() => setCommentPendingDelete(comment)}
-                                    className="btn btn-ghost !h-8 !w-8 !p-0 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                                    className="btn btn-ghost !h-8 !w-8 !p-0 text-red-300 hover:text-red-200"
                                     title="Delete comment"
                                     aria-label="Delete comment"
                                   >
@@ -857,10 +1092,83 @@ export function TaskPanel({
                   onDeleteSubtask(subtaskPendingDelete.id)
                   setSubtaskPendingDelete(null)
                 }}
-                className="btn text-xs bg-red-500/15 text-red-300 hover:bg-red-500/25"
+                className="btn text-xs bg-red-500/15 text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {attachmentPendingDelete && onDeleteAttachment ? (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/70 px-4 animate-fade-in">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-attachment-title"
+            className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] p-5 shadow-2xl shadow-black/40"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-400">
+                <Paperclip className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <h4 id="delete-attachment-title" className="text-sm font-semibold text-white">Remove attachment?</h4>
+                <p className="mt-1 text-sm leading-5 text-zinc-400">
+                  This removes the FocusClaw reference to <span className="font-medium text-zinc-200">"{attachmentPendingDelete.name}"</span>. The original file or folder is not deleted.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setAttachmentPendingDelete(null)}
+                className="btn btn-secondary text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void onDeleteAttachment(attachmentPendingDelete.id)
+                  setAttachmentPendingDelete(null)
+                }}
+                className="btn text-xs bg-red-500/15 text-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {attachmentError ? (
+        <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/70 px-4 animate-fade-in">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="attachment-error-title"
+            className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] p-5 shadow-2xl shadow-black/40"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <h4 id="attachment-error-title" className="text-sm font-semibold text-white">{attachmentError.title}</h4>
+                <p className="mt-1 text-sm leading-5 text-zinc-400">{attachmentError.message}</p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAttachmentError(null)}
+                className="btn btn-primary text-xs"
+              >
+                OK
               </button>
             </div>
           </div>
@@ -900,7 +1208,7 @@ export function TaskPanel({
                   void onDeleteComment(commentPendingDelete.id)
                   setCommentPendingDelete(null)
                 }}
-                className="btn text-xs bg-red-500/15 text-red-300 hover:bg-red-500/25"
+                className="btn text-xs bg-red-500/15 text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Delete

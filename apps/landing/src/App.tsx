@@ -1,4 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+
+const THEME_FAMILY_KEY = 'focusclaw.theme.family'
+const DEFAULT_LOGO_SRC = '/fc-logo.png'
+const HERMES_LOGO_SRC = '/grok-hermes.png'
+
+function getLogoSrc() {
+  if (typeof window === 'undefined') return DEFAULT_LOGO_SRC
+  try {
+    return window.localStorage.getItem(THEME_FAMILY_KEY) === 'hermes' ? HERMES_LOGO_SRC : DEFAULT_LOGO_SRC
+  } catch {
+    return DEFAULT_LOGO_SRC
+  }
+}
+
+function updateFavicon(src: string) {
+  let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (!favicon) {
+    favicon = document.createElement('link')
+    favicon.rel = 'icon'
+    document.head.appendChild(favicon)
+  }
+  favicon.type = 'image/png'
+  favicon.href = src
+}
 
 const CheckIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0">
@@ -46,58 +70,51 @@ const CodeIcon = () => (
   </svg>
 )
 
-const agents = [
-  { name: 'OpenClaw', logo: 'https://www.openclaw.ai/logo.svg' },
-  { name: 'Claude', logo: '' },
-  { name: 'Cursor', logo: '' },
-  { name: 'Rook', logo: '' },
-]
-
 const features = [
   {
     icon: <BrainIcon />,
-    title: 'Context-aware tasks',
-    desc: 'Keep project history, decisions, and priorities attached to the work so humans and agents see the same context.',
+    title: 'Shared task context',
+    desc: 'Keep project history, decisions, priorities, and handoffs in one record that OpenClaw, Hermes, and the human can all read.',
   },
   {
     icon: <DatabaseIcon />,
     title: 'Persistent SQLite storage',
-    desc: 'Tasks live in a real database, not a JSON file. Built for developers who want speed and portability.',
+    desc: 'Tasks live in a local database, not scattered chat notes. Fast, portable, and easy to back up.',
   },
   {
     icon: <CodeIcon />,
-    title: 'Local task API',
-    desc: 'A simple local API keeps the app, chat tools, and database speaking the same task model.',
+    title: 'OpenClaw and Hermes ready',
+    desc: 'A local REST API gives OpenClaw plugin tools and Hermes integrations the same stable task model.',
   },
   {
     icon: <ShieldIcon />,
     title: 'Structured task model',
-    desc: 'Projects, tasks, assignees, tags, comments, due dates. A real schema that agents can query and reason over.',
+    desc: 'Projects, tasks, owner labels, tags, comments, due dates, and attachments give agents structure without pretending labels are permissions.',
   },
 ]
 
 const howItWorks = [
-  { step: '01', title: 'Create a project', desc: 'Define the project in plain language. FocusClaw structures it — assignees, tags, priority, due dates.' },
-  { step: '02', title: 'Assign and prioritize', desc: 'Drop tasks into place with owner filters, tags, priority, due dates, and calendar views.' },
-  { step: '03', title: 'Discuss and update', desc: 'Use comments, tags, dates, and owner labels to keep the task record current.' },
+  { step: '01', title: 'Create the work', desc: 'Capture a project or task in FocusClaw from the app, OpenClaw, Hermes, or a local script.' },
+  { step: '02', title: 'Keep context attached', desc: 'Use owner labels, tags, priority, due dates, comments, subtasks, and local attachments to keep the record complete.' },
+  { step: '03', title: 'Let agents coordinate', desc: 'OpenClaw and Hermes can read status, create tasks, update progress, and hand work back without scraping the UI.' },
 ]
 
 const faqs = [
   {
     q: 'What makes FocusClaw different from Linear or Asana?',
-    a: 'Linear and Asana are broad team tools. FocusClaw is a small local task manager built for humans and agents to share one clear task record.',
+    a: 'Linear and Asana are broad team tools. FocusClaw is a local-first task layer for OpenClaw, Hermes, and humans sharing one clear work record.',
   },
   {
     q: 'Do I need to use OpenClaw to use FocusClaw?',
-    a: 'No. FocusClaw is useful as a plain task app. OpenClaw can read and update tasks through local tools, but assignment labels do not grant or block execution.',
+    a: 'No. FocusClaw works as a plain task app. OpenClaw gets first-class plugin tools, and Hermes can use the same local API.',
   },
   {
-    q: 'How does the API work?',
-    a: 'Standard REST. GET /projects, POST /tasks, PATCH /tasks/:id, DELETE. JSON request/response. Auth via bearer token.',
+    q: 'How does Hermes connect?',
+    a: 'Hermes connects through the local REST API. It can list projects, read tasks, create updates, add comments, and complete work without browser automation.',
   },
   {
     q: 'Can I self-host it?',
-    a: 'Yes. It\'s SQLite under the hood — one file, no external database dependency. Deploy to any server, any cloud. Your data stays yours.',
+    a: 'Yes. It is SQLite under the hood and local-first by default. Run it on your own machine and use private Tailscale access when you need another device.',
   },
   {
     q: 'Can I access FocusClaw from multiple devices?',
@@ -105,7 +122,7 @@ const faqs = [
   },
   {
     q: 'Is there a hosted version?',
-    a: 'Coming soon. We\'ll offer a managed cloud version for teams who don\'t want to self-host. Self-host remain free.',
+    a: 'Not yet. The current priority is the local-first OpenClaw and Hermes workflow. Managed hosting can come later if it proves useful.',
   },
 ]
 
@@ -113,6 +130,25 @@ export default function App() {
   const [openFaq, setOpenFaq] = useState<number | null>(null)
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [logoSrc, setLogoSrc] = useState(getLogoSrc)
+
+  useEffect(() => {
+    updateFavicon(logoSrc)
+  }, [logoSrc])
+
+  useEffect(() => {
+    const refreshLogo = () => setLogoSrc(getLogoSrc())
+
+    window.addEventListener('focus', refreshLogo)
+    window.addEventListener('pageshow', refreshLogo)
+    window.addEventListener('storage', refreshLogo)
+
+    return () => {
+      window.removeEventListener('focus', refreshLogo)
+      window.removeEventListener('pageshow', refreshLogo)
+      window.removeEventListener('storage', refreshLogo)
+    }
+  }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -125,7 +161,7 @@ export default function App() {
       {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 backdrop-blur-md bg-[#09090b]/80 border-b border-[#27272a]">
         <div className="flex items-center gap-2 text-lg font-extrabold">
-          <img src="/fc-logo.png" alt="" aria-hidden="true" className="w-7 h-7 rounded-lg" />
+          <img src={logoSrc} alt="" aria-hidden="true" className="w-7 h-7 rounded-lg" />
           <span>FocusClaw</span>
         </div>
         <div className="hidden md:flex items-center gap-8 text-sm text-[#a1a1aa]">
@@ -150,14 +186,14 @@ export default function App() {
         <div className="relative max-w-4xl mx-auto text-center">
           <div className="badge bg-[#f53d2d]/10 text-[#f53d2d] border border-[#f53d2d]/20 mb-6 animate-fade-in-up">
             <span className="w-1.5 h-1.5 rounded-full bg-[#f53d2d] animate-pulse" />
-            Agent-native task management
+            Task context for OpenClaw and Hermes
           </div>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 animate-fade-in-up" style={{animationDelay:'0.1s'}}>
-            Your agent's<br />
-            <span className="gradient-text">second brain</span> for tasks
+            The shared task layer<br />
+            <span className="gradient-text">for your agents</span>
           </h1>
           <p className="text-xl md:text-2xl text-[#a1a1aa] max-w-2xl mx-auto mb-10 leading-relaxed animate-fade-in-up" style={{animationDelay:'0.2s'}}>
-            FocusClaw gives humans and AI agents persistent, structured task context for every project. Owners, due dates, comments, and status stay organized in one place.
+            FocusClaw gives OpenClaw, Hermes, and the human a persistent source of truth for projects, tasks, comments, due dates, attachments, and handoffs.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center animate-fade-in-up" style={{animationDelay:'0.3s'}}>
             <a href="http://localhost:5173" className="btn-primary text-base px-8 py-3 pulse-glow" style={{textDecoration:'none'}}>
@@ -170,7 +206,7 @@ export default function App() {
             </a>
           </div>
           <p className="text-sm text-[#71717a] mt-4 animate-fade-in-up" style={{animationDelay:'0.4s'}}>
-            Self-hosted · SQLite · REST API · Open source
+            Local-first · SQLite · REST API · Open source
           </p>
         </div>
       </section>
@@ -190,7 +226,7 @@ export default function App() {
           <div className="w-px bg-[#27272a] hidden md:block" />
           <div>
             <div className="text-2xl font-extrabold text-[#fafafa]">REST API</div>
-            <div className="text-sm text-[#71717a]">Plain CRUD · Local-first</div>
+            <div className="text-sm text-[#71717a]">OpenClaw · Hermes</div>
           </div>
           <div className="w-px bg-[#27272a] hidden md:block" />
           <div>
@@ -204,8 +240,8 @@ export default function App() {
       <section id="features" className="py-20 px-6">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold mb-4">Built for agents first</h2>
-            <p className="text-[#a1a1aa] text-lg max-w-xl mx-auto">Human-friendly task management with the structured fields an AI agent can read, update, and coordinate through.</p>
+            <h2 className="text-4xl md:text-5xl font-bold mb-4">Built for OpenClaw and Hermes</h2>
+            <p className="text-[#a1a1aa] text-lg max-w-xl mx-auto">Human-friendly task management with the structured fields agents need to read, update, and coordinate work reliably.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {features.map((f) => (
@@ -245,18 +281,19 @@ export default function App() {
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div>
-              <div className="badge bg-[#f53d2d]/10 text-[#f53d2d] border border-[#f53d2d]/20 mb-4">For AI agents</div>
-              <h2 className="text-4xl md:text-5xl font-bold mb-6">A task record your agent can read</h2>
+              <div className="badge bg-[#f53d2d]/10 text-[#f53d2d] border border-[#f53d2d]/20 mb-4">For OpenClaw and Hermes</div>
+              <h2 className="text-4xl md:text-5xl font-bold mb-6">A task record your agents can trust</h2>
               <p className="text-[#a1a1aa] text-lg leading-relaxed mb-6">
-                FocusClaw keeps work in a structured local database so humans and agents can create tasks, comment, update fields, and see the same context.
+                FocusClaw keeps work in a structured local database so OpenClaw, Hermes, and the human can create tasks, comment, update fields, and see the same context.
               </p>
               <ul className="space-y-3">
                 {[
-                  'Task creation and updates via REST API',
+                  'OpenClaw plugin tools for task status and updates',
+                  'Hermes integration through the local REST API',
                   'Structured project/task hierarchy',
                   'Owner labels for User, Agent, or Unassigned',
-                  'Priority, tags, due dates, comments',
-                  'No scheduled automation queue',
+                  'Priority, tags, due dates, comments, and attachments',
+                  'No hidden scheduled automation queue',
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-3 text-[#a1a1aa]">
                     <span className="text-[#22c55e]"><CheckIcon /></span>
@@ -273,23 +310,27 @@ export default function App() {
                 <span className="ml-2 text-sm text-[#71717a]">agent-task.ts</span>
               </div>
               <pre className="text-sm text-[#a1a1aa] overflow-x-auto leading-relaxed">
-                <code>{`// Label a task for the agent
+                <code>{`// Label a task for agent coordination
 const task = await fetch('/api/tasks', {
   method: 'POST',
-  headers: { Authorization: 'Bearer <token>' },
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': '<optional-api-key>',
+  },
   body: JSON.stringify({
     projectId: 'proj_alpha',
-    title: 'Ship landing page by Friday',
+    title: 'Ship the OpenClaw landing page by Friday',
     assignee: 'agent',
-    priority: 'high',
-    tags: ['marketing', 'launch'],
-    dueDate: '2026-05-08',
+    priority: 2,
+    labels: ['marketing', 'launch'],
+    dueDate: '2026-07-10',
   }),
-})
+}).then((response) => response.json())
 
-// Later, anyone can update the task record
+// Later, OpenClaw or Hermes can update the same record
 await fetch('/api/tasks/' + task.id, {
   method: 'PATCH',
+  headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ archived: true }),
 })`}</code>
               </pre>
@@ -303,7 +344,7 @@ await fetch('/api/tasks/' + task.id, {
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">Simple, honest pricing</h2>
-            <p className="text-[#a1a1aa] text-lg">Free forever for self-host. Pay for convenience.</p>
+            <p className="text-[#a1a1aa] text-lg">Free forever for local self-hosting. Pay for convenience later.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
             {/* Free */}
@@ -312,7 +353,7 @@ await fetch('/api/tasks/' + task.id, {
               <p className="text-4xl font-extrabold mb-1">Free</p>
               <p className="text-[#71717a] text-sm mb-6">Forever. No catches.</p>
               <ul className="space-y-3 mb-8">
-                {['Unlimited projects & tasks', 'SQLite storage', 'Local task API', 'Owner filters and calendar views', 'Comments and activity'].map((item) => (
+                {['Unlimited projects & tasks', 'SQLite storage', 'OpenClaw and Hermes API access', 'Owner filters and calendar views', 'Comments, subtasks, and local attachments'].map((item) => (
                   <li key={item} className="flex items-center gap-3 text-sm text-[#a1a1aa]">
                     <span className="text-[#22c55e]"><CheckIcon /></span>
                     {item}
@@ -330,7 +371,7 @@ await fetch('/api/tasks/' + task.id, {
               <p className="text-4xl font-extrabold mb-1">$0<span className="text-lg font-normal text-[#71717a]">/mo</span></p>
               <p className="text-[#71717a] text-sm mb-6">Managed for you. Always on.</p>
               <ul className="space-y-3 mb-8">
-                {['Everything in Self-host', 'Always-on hosted infra', 'Auto-scaling for teams', 'Team-ready API access', 'Email support'].map((item) => (
+                {['Everything in Self-host', 'Always-on hosted infra', 'Private team access', 'Managed API keys', 'Email support'].map((item) => (
                   <li key={item} className="flex items-center gap-3 text-sm text-[#a1a1aa]">
                     <span className="text-[#22c55e]"><CheckIcon /></span>
                     {item}
@@ -377,8 +418,8 @@ await fetch('/api/tasks/' + task.id, {
       {/* CTA */}
       <section className="py-20 px-6">
         <div className="max-w-2xl mx-auto text-center">
-          <h2 className="text-4xl md:text-5xl font-bold mb-4">Ready to give your agent a memory?</h2>
-          <p className="text-[#a1a1aa] text-lg mb-8">Join the developers building a calmer shared task source of truth with FocusClaw.</p>
+          <h2 className="text-4xl md:text-5xl font-bold mb-4">Ready to give OpenClaw and Hermes a task home?</h2>
+          <p className="text-[#a1a1aa] text-lg mb-8">Join the developers building a calmer local source of truth for agent-assisted work.</p>
           {!submitted ? (
             <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
               <input
@@ -409,7 +450,7 @@ await fetch('/api/tasks/' + task.id, {
       <footer className="border-t border-[#27272a] py-8 px-6">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm font-bold">
-            <img src="/fc-logo.png" alt="" aria-hidden="true" className="w-6 h-6 rounded-md" />
+            <img src={logoSrc} alt="" aria-hidden="true" className="w-6 h-6 rounded-md" />
             <span>FocusClaw</span>
           </div>
           <p className="text-sm text-[#71717a]">© 2026 FocusClaw. Open source under MIT.</p>

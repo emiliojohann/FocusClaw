@@ -110,7 +110,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
 
       {open && (
         <div
-          className={`absolute z-50 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3 shadow-2xl ${
+          className={`fc-date-picker-popover absolute z-50 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3 shadow-2xl ${
             placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
           } ${align === 'right' ? 'right-0' : 'left-0'}`}
           style={{ width: 'min(22rem, calc(100vw - 24px))' }}

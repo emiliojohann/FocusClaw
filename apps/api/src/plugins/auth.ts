@@ -4,9 +4,17 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 // Set API_KEY env var to protect the API.
 // For local single-user development, leaving API_KEY unset disables auth.
 
+function isLoopbackHost(host: string | undefined): boolean {
+  const normalized = (host || '127.0.0.1').trim().toLowerCase()
+  return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1'
+}
+
 export async function authPlugin(fastify: FastifyInstance) {
   // Skip auth entirely if no API_KEY is set (solo local mode)
   if (!process.env.API_KEY) {
+    if (!isLoopbackHost(process.env.API_HOST)) {
+      throw new Error('API_KEY is required when API_HOST is not loopback.')
+    }
     fastify.log.warn('API_KEY is unset; API auth is disabled for local-only development.')
     return
   }

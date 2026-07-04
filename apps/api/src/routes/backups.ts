@@ -6,7 +6,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import Database, { Database as BetterSqliteDatabase } from 'better-sqlite3'
 import { sqlite } from '../db'
 
-const APP_VERSION = 'v2026.6.22'
+const APP_VERSION = 'v2026.07.03'
 const SCHEMA_VERSION = 'sqlite-v1'
 const FORMAT_VERSION = 1
 const BACKUP_DIR = resolve(homedir(), '.focusclaw', 'backups')
@@ -16,6 +16,7 @@ const SNAPSHOT_PREFIX = 'focusclaw-snapshot-'
 const BACKUP_SETTINGS_FILE = 'backup-settings.json'
 const MAX_SNAPSHOT_FILES = 5
 const MAX_BACKUP_BYTES = 50 * 1024 * 1024
+const MIN_EXPORT_PASSPHRASE_LENGTH = 12
 
 type BackupEnvelope = {
   formatVersion: number
@@ -58,6 +59,7 @@ const TABLES = [
   'tags',
   'tasks',
   'task_tags',
+  'task_attachments',
   'activity_log',
 ] as const
 
@@ -93,6 +95,7 @@ const TABLE_COLUMNS: Record<typeof TABLES[number], string[]> = {
     'updated_at',
   ],
   task_tags: ['task_id', 'tag_id', 'created_at'],
+  task_attachments: ['id', 'task_id', 'name', 'kind', 'uri', 'mime_type', 'size_bytes', 'created_at'],
   activity_log: ['id', 'task_id', 'user_id', 'action', 'changes', 'created_at'],
 }
 
@@ -316,6 +319,18 @@ function normalizeBackupData(data: Record<string, unknown[]>): Record<string, un
     return Boolean(id && taskId && taskIds.has(taskId))
   })
 
+  const taskAttachments = rowsFor(data, 'task_attachments').filter((row) => {
+    const id = stringId(row.id)
+    const taskId = stringId(row.task_id)
+    const name = typeof row.name === 'string' ? row.name.trim() : ''
+    const uri = typeof row.uri === 'string' ? row.uri.trim() : ''
+    if (!id || !taskId || !taskIds.has(taskId) || !name || !uri) return false
+    row.name = name
+    row.uri = uri
+    if (typeof row.kind !== 'string' || !row.kind.trim()) row.kind = 'file'
+    return true
+  })
+
   return {
     workspaces,
     projects,
@@ -325,6 +340,7 @@ function normalizeBackupData(data: Record<string, unknown[]>): Record<string, un
     tags,
     tasks: taskRows,
     task_tags: taskTags,
+    task_attachments: taskAttachments,
     activity_log: activityLog,
   }
 }
@@ -431,6 +447,7 @@ function restoreFromPayload(payload: ExportPayload) {
   sqlite.exec('PRAGMA foreign_keys = OFF')
   const tx = sqlite.transaction(() => {
     sqlite.exec('DELETE FROM task_tags')
+    sqlite.exec('DELETE FROM task_attachments')
     sqlite.exec('DELETE FROM activity_log')
     sqlite.exec('DELETE FROM tasks')
     sqlite.exec('DELETE FROM tags')
@@ -588,7 +605,9 @@ export async function backupRoutes(fastify: FastifyInstance) {
     try {
       const { fileName } = request.params as { fileName: string }
       const { passphrase } = request.body as { passphrase?: string }
-      if (!passphrase || passphrase.length < 6) return reply.status(400).send({ error: 'Passphrase must be at least 6 characters' })
+      if (!passphrase || passphrase.length < MIN_EXPORT_PASSPHRASE_LENGTH) {
+        return reply.status(400).send({ error: `Passphrase must be at least ${MIN_EXPORT_PASSPHRASE_LENGTH} characters` })
+      }
 
       const safeName = sanitizeSnapshotFilename(fileName)
       const fullPath = resolve(BACKUP_DIR, safeName)
@@ -622,7 +641,9 @@ export async function backupRoutes(fastify: FastifyInstance) {
 
   fastify.post('/export', async (request: FastifyRequest, reply: FastifyReply) => {
     const { passphrase } = request.body as { passphrase?: string }
-    if (!passphrase || passphrase.length < 6) return reply.status(400).send({ error: 'Passphrase must be at least 6 characters' })
+    if (!passphrase || passphrase.length < MIN_EXPORT_PASSPHRASE_LENGTH) {
+      return reply.status(400).send({ error: `Passphrase must be at least ${MIN_EXPORT_PASSPHRASE_LENGTH} characters` })
+    }
 
     await ensureBackupDir()
     const payload = exportCurrentData()

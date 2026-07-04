@@ -262,7 +262,7 @@ export function TagsEditor({ labels, onChange, projectId }: TagsEditorProps) {
                   const tag = savedTags.find((savedTag) => savedTag.id === editingTagId)
                   if (tag) setTagPendingDelete(tag)
                 }}
-                className="btn btn-ghost text-xs text-red-400 hover:bg-red-500/10 px-3"
+                className="btn btn-ghost text-xs text-red-400 px-3"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -294,7 +294,7 @@ export function TagsEditor({ labels, onChange, projectId }: TagsEditorProps) {
               <button onClick={() => setTagPendingDelete(null)} className="btn btn-secondary text-xs" disabled={deletingTag}>
                 Cancel
               </button>
-              <button onClick={deleteTag} className="btn text-xs bg-red-500/15 text-red-300 hover:bg-red-500/25" disabled={deletingTag}>
+              <button onClick={deleteTag} className="btn text-xs bg-red-500/15 text-red-300" disabled={deletingTag}>
                 {deletingTag ? 'Deleting...' : 'Delete'}
               </button>
             </div>

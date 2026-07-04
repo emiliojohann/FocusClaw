@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS task_tags (
   PRIMARY KEY (task_id, tag_id)
 );
 
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'file',
+  uri TEXT NOT NULL,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 CREATE TABLE IF NOT EXISTS workspace_members (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -100,3 +111,4 @@ CREATE INDEX IF NOT EXISTS idx_activity_log_task_id ON activity_log(task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
 CREATE INDEX IF NOT EXISTS idx_task_tags_task_id ON task_tags(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_tags_tag_id ON task_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_task_id ON task_attachments(task_id);

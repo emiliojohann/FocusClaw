@@ -1,5 +1,44 @@
 # Changelog
 
+## v2026.07.03 - 2026-07-03
+
+### Thanks
+
+Special thanks to:
+
+- https://x.com/m_zokov
+- https://x.com/TomTurcotteTech
+- https://x.com/BChopLXXXII
+
+### Changes
+
+- Includes all FocusClaw changes since `v2026.6.22`, including the internal DEV increments `v2026.6.22.1`, `v2026.6.22.2`, `v2026.6.22.3`, `v2026.06.30`, and `v2026.07.02`.
+- Fixed mobile Calendar new-task launch so the top-bar New Task button opens the task creation popup reliably.
+- Changed new-task project selection to require an explicit "Select a project" choice instead of defaulting to the active or last-used project.
+- Made disabled primary buttons visibly greyed out until required fields are complete.
+- Fixed filtered task creation so newly created tasks only appear immediately when they match the active project, status, tag, owner, and search filters, preventing the quick add-then-disappear flash.
+- Added agent-friendly JSON route aliases for tasks and projects: `GET /api/tasks`, `GET /api/tasks?workspaceId=...`, `GET /api/tasks?projectId=...`, and `GET /api/projects?workspaceId=...`.
+- Kept the existing project-scoped API routes intact for backwards compatibility.
+- Increased task and subtask descriptions from 5,000 to 10,000 characters.
+- Expanded description editing space in task details and new-task forms so long generated drafts can be reviewed without cramped scrolling.
+- Added a Markdown mini editor and preview for task descriptions.
+- Added separate Appearance controls for mode (`System`, `Dark`, `Light`) and theme family (`OpenClaw`, `Hermes`), so each family resolves its own dark/light palette automatically.
+- Fixed light-theme project pill contrast so project names remain readable.
+- Added task attachment metadata support for local paths, images, PDFs, and folders without uploading or owning the original files.
+- Added attachment API routes and backup/export coverage.
+- Updated Hermes and shared API docs to prefer the discoverable JSON routes.
+- Reworked task descriptions into a shared Live/Code editor for task details and new-task creation: Live is the default editable rendered Markdown view, and Code is the raw Markdown/source view for agents and developers.
+- Reworked attachments into a local-only `Select a file` flow that infers file/image/PDF type, stores metadata plus the local path, supports rename/open/missing-file handling, and shows compact paperclip indicators on task cards.
+- Removed URL attachments from the app and API because FocusClaw cannot validate or control external URL content.
+- Hardened Markdown rendering, inline code insertion, local attachment opening, non-loopback API auth, and encrypted backup passphrase requirements.
+- Fixed mobile Settings bottom navigation clearance, iOS/Chrome viewport height behavior, and first-navigation layout shifts.
+- Updated the landing page, app metadata, README, spec, API docs, Hermes docs, shared API notes, and OpenClaw plugin metadata to position FocusClaw as the local task context layer for OpenClaw, Hermes, and humans.
+- Added Hermes logo/favicons and theme-family-aware logo switching across the app and landing page.
+- Added Hermes theme family metadata, colors, and transition handling so OpenClaw and Hermes themes switch cleanly.
+- Refined the empty task dashboard state with clearer create-task prompts and copy.
+- Fixed desktop search and theme-transition spacing so the dashboard search area behaves more smoothly.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.7.3` / `v2026.07.03`.
+
 ## v2026.6.22 - 2026-06-22
 
 - Hid native browser search clear controls so FocusClaw shows only its custom search close button.

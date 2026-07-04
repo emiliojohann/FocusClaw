@@ -77,6 +77,27 @@ export const taskApi = {
     request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE', headers: {} }),
   get: (taskId: string) =>
     request<any>(`/tasks/${taskId}`),
+  getAttachments: (taskId: string) =>
+    request<any[]>(`/tasks/${taskId}/attachments`),
+  pickLocalAttachment: (kind?: string) =>
+    request<{ name: string; kind: string; uri: string } | undefined>('/tasks/attachments/pick-local', {
+      method: 'POST',
+      body: JSON.stringify(kind ? { kind } : {}),
+    }),
+  addAttachment: (taskId: string, data: { name: string; kind: string; uri: string; mimeType?: string | null; sizeBytes?: number | null }) =>
+    request<any>(`/tasks/${taskId}/attachments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateAttachmentName: (taskId: string, attachmentId: string, name: string) =>
+    request<any>(`/tasks/${taskId}/attachments/${attachmentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+  openAttachment: (taskId: string, attachmentId: string) =>
+    request<void>(`/tasks/${taskId}/attachments/${attachmentId}/open`, { method: 'POST', headers: {} }),
+  deleteAttachment: (taskId: string, attachmentId: string) =>
+    request<void>(`/tasks/${taskId}/attachments/${attachmentId}`, { method: 'DELETE', headers: {} }),
   create: (data: {
     projectId: string
     title: string

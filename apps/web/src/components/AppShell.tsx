@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { CalendarDays, Check, Plus, Settings, Smartphone } from 'lucide-react'
+import { getThemeLogoSrc, THEME_FAMILY_CHANGE_EVENT } from '@/lib/themeSettings'
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_URL } from '@/lib/version'
 
 type AppView = 'tasks' | 'calendar' | 'settings'
@@ -21,6 +22,7 @@ const navItems = [
 
 const UPDATE_PREVIEW_TAG = 'v9999.0.0-preview'
 const UPDATE_PREVIEW_STORAGE_KEY = 'focusclaw.previewUpdate'
+const LATEST_RELEASE_STORAGE_KEY = 'focusclaw.latestReleaseTag'
 const NEW_TASK_EVENT = 'focusclaw:new-task'
 
 function normalizeVersionTag(tag: string): number[] {
@@ -40,6 +42,16 @@ function isNewerVersion(latestTag: string, currentTag: string): boolean {
   return false
 }
 
+function readCachedLatestReleaseTag(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    const tag = window.localStorage.getItem(LATEST_RELEASE_STORAGE_KEY) || ''
+    return tag && isNewerVersion(tag, APP_VERSION) ? tag : ''
+  } catch {
+    return ''
+  }
+}
+
 export function AppShell({
   activeView,
   children,
@@ -47,16 +59,31 @@ export function AppShell({
   sidebarVisible = true,
   mainClassName = 'flex-1 min-w-0',
 }: AppShellProps) {
-  const [latestReleaseTag, setLatestReleaseTag] = useState('')
+  const [latestReleaseTag, setLatestReleaseTag] = useState(readCachedLatestReleaseTag)
+  const [logoSrc, setLogoSrc] = useState(getThemeLogoSrc)
   const location = useLocation()
   const navigate = useNavigate()
 
   useEffect(() => {
+    const refreshLogo = () => setLogoSrc(getThemeLogoSrc())
+
+    window.addEventListener(THEME_FAMILY_CHANGE_EVENT, refreshLogo)
+    window.addEventListener('storage', refreshLogo)
+
+    return () => {
+      window.removeEventListener(THEME_FAMILY_CHANGE_EVENT, refreshLogo)
+      window.removeEventListener('storage', refreshLogo)
+    }
+  }, [])
+
+  useEffect(() => {
     const updateVisualViewportGap = () => {
       const viewport = window.visualViewport
+      const viewportHeight = viewport?.height ?? window.innerHeight
       const bottomGap = viewport
         ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
         : 0
+      document.documentElement.style.setProperty('--fc-visual-viewport-height', `${viewportHeight}px`)
       document.documentElement.style.setProperty('--fc-visual-viewport-bottom-gap', `${bottomGap}px`)
     }
 
@@ -107,7 +134,13 @@ export function AppShell({
       .then((response) => response.ok ? response.json() : null)
       .then((release: { tag_name?: unknown } | null) => {
         if (cancelled || typeof release?.tag_name !== 'string') return
-        if (isNewerVersion(release.tag_name, APP_VERSION)) setLatestReleaseTag(release.tag_name)
+        const nextTag = isNewerVersion(release.tag_name, APP_VERSION) ? release.tag_name : ''
+        setLatestReleaseTag(nextTag)
+        try {
+          window.localStorage.setItem(LATEST_RELEASE_STORAGE_KEY, nextTag)
+        } catch {
+          // Release checks should never affect layout or navigation.
+        }
       })
       .catch(() => {
         // Offline, private repos, and rate limits should not interrupt the app.
@@ -128,8 +161,12 @@ export function AppShell({
   ) : null
 
   const openMobileNewTask = () => {
-    if (location.pathname === '/' || location.pathname === '/calendar') {
+    if (location.pathname === '/') {
       window.dispatchEvent(new Event(NEW_TASK_EVENT))
+      return
+    }
+    if (location.pathname === '/calendar') {
+      navigate('/calendar?newTask=1')
       return
     }
     navigate('/?newTask=1')
@@ -140,7 +177,7 @@ export function AppShell({
       {sidebarVisible ? (
         <aside className="hidden w-60 bg-[var(--bg-secondary)] border-r border-[var(--border)] lg:flex lg:flex-col">
           <Link to="/" className="fc-header-row px-6 border-b border-[var(--border)] flex items-center gap-2 text-white text-lg font-extrabold hover:bg-[var(--bg-elevated)]/40">
-            <img src="/fc-logo-app.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="w-7 h-7 rounded-lg flex-shrink-0" />
+            <img src={logoSrc} alt="" aria-hidden="true" loading="eager" decoding="sync" className="w-7 h-7 rounded-lg flex-shrink-0" />
             <span>FocusClaw</span>
           </Link>
           {latestReleaseTag ? <div className="px-4 pt-4">{renderUpdateIndicator('w-full')}</div> : null}
@@ -187,7 +224,7 @@ export function AppShell({
       <header className="fc-mobile-topbar z-30 shrink-0 bg-[var(--bg-secondary)]/95 px-3 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-2 backdrop-blur-xl lg:hidden">
         <div className="mx-auto flex h-11 w-full max-w-md items-center justify-between gap-3">
           <Link to="/" className="fc-mobile-brand mr-auto flex min-w-0 items-center gap-2 rounded-lg pr-2 text-sm font-extrabold text-white">
-            <img src="/fc-logo-app.png" alt="" aria-hidden="true" loading="eager" decoding="sync" className="h-7 w-7 flex-shrink-0 rounded-lg" />
+            <img src={logoSrc} alt="" aria-hidden="true" loading="eager" decoding="sync" className="h-7 w-7 flex-shrink-0 rounded-lg" />
             <span className="truncate">FocusClaw</span>
           </Link>
           {latestReleaseTag ? <div className="shrink-0">{renderUpdateIndicator()}</div> : null}
@@ -228,7 +265,7 @@ export function AppShell({
       </nav>
 
       <div className="fc-portrait-lock" role="status" aria-live="polite">
-        <img src="/fc-logo-app.png" alt="" aria-hidden="true" className="fc-portrait-lock-logo" />
+        <img src={logoSrc} alt="" aria-hidden="true" className="fc-portrait-lock-logo" />
         <Smartphone className="fc-portrait-lock-icon" aria-hidden="true" />
         <div className="fc-portrait-lock-copy">
           <p className="fc-portrait-lock-title">Rotate or resize your window</p>

@@ -307,7 +307,7 @@ function toolError(prefix: string, err: unknown) {
 export default definePluginEntry({
   id: 'focusclaw',
   name: 'FocusClaw',
-  description: 'Agent-native task management. Read compact task status, then create, update, complete, or delete tasks in FocusClaw from OpenClaw.',
+  description: 'Task context for OpenClaw. Read compact status, then create, update, complete, or delete FocusClaw tasks from agent workflows.',
   register(api) {
     api.registerTool({
       name: 'focusclaw_plain_text_command',

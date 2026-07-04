@@ -100,6 +100,18 @@ export const taskTags = sqliteTable('task_tags', {
   pk: primaryKey({ columns: [t.taskId, t.tagId] }),
 }))
 
+// Task attachment metadata. Files stay where the user/agent created them.
+export const taskAttachments = sqliteTable('task_attachments', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  taskId: text('task_id').notNull(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull().default('file'),
+  uri: text('uri').notNull(),
+  mimeType: text('mime_type'),
+  sizeBytes: integer('size_bytes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date())
+})
+
 // Workspace members
 export const workspaceMembers = sqliteTable('workspace_members', {
   id: text('id').primaryKey().$defaultFn(() => generateId()),
