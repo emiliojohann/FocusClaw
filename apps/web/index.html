@@ -7,6 +7,7 @@
     <meta name="description" content="Local-first task manager for OpenClaw and Hermes agents with project context, due dates, comments, and an Agent Automation API." />
     <link rel="icon" type="image/png" href="/fc-logo-app.png" />
     <link rel="preload" as="image" href="/fc-logo-app.png" />
+    <link rel="preload" as="image" href="/grok-hermes-app.png" />
     <script>
       (() => {
         const key = 'focusclaw.theme.preference'
@@ -24,7 +25,7 @@
         document.documentElement.dataset.themePreference = preference
         document.documentElement.dataset.theme = preference === 'system' ? systemTheme : preference
         document.documentElement.dataset.themeFamily = family
-        const logo = family === 'hermes' ? '/grok-hermes.png' : '/fc-logo-app.png'
+        const logo = family === 'hermes' ? '/grok-hermes-app.png' : '/fc-logo-app.png'
         const favicon = document.querySelector('link[rel="icon"]')
         if (favicon) favicon.href = logo
       })()

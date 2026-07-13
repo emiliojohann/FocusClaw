@@ -338,32 +338,34 @@ export function DescriptionEditor({
         </div>
       ) : null}
       <div className="fc-description-field">
-        {mode === 'live' ? (
-          <div
-            ref={liveEditorRef}
-            contentEditable
-            suppressContentEditableWarning
-            role="textbox"
-            aria-multiline="true"
-            aria-label={label}
-            className="input fc-description-editor-surface fc-description-live-surface"
-            style={{ height: editorHeight, minHeight }}
-            data-placeholder={placeholder}
-            onInput={handleLiveInput}
-            onBlur={handleLiveInput}
-          />
-        ) : (
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            maxLength={DESCRIPTION_MAX_LENGTH}
-            rows={rows}
-            className="input fc-description-editor-surface fc-description-code-surface"
-            style={{ height: editorHeight, minHeight }}
-            placeholder="Write Markdown..."
-          />
-        )}
+        <div className="fc-resizable-surface-frame">
+          {mode === 'live' ? (
+            <div
+              ref={liveEditorRef}
+              contentEditable
+              suppressContentEditableWarning
+              role="textbox"
+              aria-multiline="true"
+              aria-label={label}
+              className="input fc-resizable-text-surface fc-description-editor-surface fc-description-live-surface"
+              style={{ height: editorHeight, minHeight }}
+              data-placeholder={placeholder}
+              onInput={handleLiveInput}
+              onBlur={handleLiveInput}
+            />
+          ) : (
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              maxLength={DESCRIPTION_MAX_LENGTH}
+              rows={rows}
+              className="input fc-resizable-text-surface fc-description-editor-surface fc-description-code-surface"
+              style={{ height: editorHeight, minHeight }}
+              placeholder="Write Markdown..."
+            />
+          )}
+        </div>
         <div
           className={`fc-description-counter text-right text-[10px] ${value.length > DESCRIPTION_MAX_LENGTH * 0.9 ? 'text-amber-300' : 'text-zinc-400'}`}
           aria-live="polite"

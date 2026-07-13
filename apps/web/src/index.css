@@ -185,6 +185,33 @@ body {
   transition: none !important;
 }
 
+.fc-brand-logo-frame {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  justify-content: center;
+}
+
+.fc-theme-logo-cache {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.fc-theme-logo-cache img {
+  display: block;
+  width: 1px;
+  height: 1px;
+}
+
 /* Button base styles */
 .btn {
   display: inline-flex;
@@ -350,17 +377,66 @@ body {
   width: 100%;
 }
 
-.fc-description-editor-surface {
+.fc-resizable-surface-frame {
+  position: relative;
+}
+
+.fc-resizable-surface-frame::after {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 1rem;
+  height: 1rem;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(135deg, transparent 0 50%, var(--text-subtle) 50% 62%, transparent 62%),
+    linear-gradient(135deg, transparent 0 66%, var(--text-subtle) 66% 76%, transparent 76%);
+  background-repeat: no-repeat;
+  opacity: 0.8;
+}
+
+.fc-resizable-text-surface {
   display: block;
   box-sizing: border-box;
-  min-height: 14rem;
-  max-height: 32.5rem;
   margin: 0;
   overflow: auto;
   resize: vertical;
-  font-size: 0.875rem;
   line-height: 1.25rem;
   vertical-align: top;
+  scrollbar-gutter: stable;
+}
+
+.fc-resizable-text-surface::-webkit-resizer {
+  background:
+    linear-gradient(135deg, transparent 0 50%, var(--text-subtle) 50% 62%, transparent 62%),
+    linear-gradient(135deg, transparent 0 66%, var(--text-subtle) 66% 76%, transparent 76%);
+  background-repeat: no-repeat;
+  opacity: 0.8;
+}
+
+.fc-resizable-text-surface::-webkit-scrollbar-corner {
+  background:
+    linear-gradient(135deg, transparent 0 50%, var(--text-subtle) 50% 62%, transparent 62%),
+    linear-gradient(135deg, transparent 0 66%, var(--text-subtle) 66% 76%, transparent 76%);
+  background-repeat: no-repeat;
+}
+
+.fc-description-editor-surface::-webkit-resizer,
+.fc-description-editor-surface::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.fc-description-editor-surface {
+  min-height: 14rem;
+  max-height: 32.5rem;
+  font-size: 0.875rem;
+}
+
+.fc-comment-editor-surface {
+  min-height: 4.75rem;
+  max-height: 16rem;
+  font-size: 0.75rem;
 }
 
 .fc-description-live-surface {
@@ -509,6 +585,68 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 
 .animate-spin {
   animation: spin 0.8s linear infinite;
+}
+
+.fc-task-loading-skeleton {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.fc-task-skeleton-card {
+  min-height: 92px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--bg-card);
+  padding: 1rem;
+}
+
+.fc-task-skeleton-line,
+.fc-task-skeleton-meta span {
+  display: block;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--bg-elevated), var(--border), var(--bg-elevated));
+  background-size: 220% 100%;
+  animation: fcSkeletonPulse 1.2s ease-in-out infinite;
+}
+
+.fc-task-skeleton-line {
+  height: 0.55rem;
+  width: 68%;
+}
+
+.fc-task-skeleton-line-title {
+  height: 0.7rem;
+  width: 46%;
+  margin-bottom: 0.8rem;
+}
+
+.fc-task-skeleton-meta {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.fc-task-skeleton-meta span {
+  height: 1.25rem;
+  width: 4.5rem;
+}
+
+@keyframes fcSkeletonPulse {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+@media (min-width: 768px) {
+  .fc-task-loading-skeleton {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .fc-task-loading-skeleton {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* Modal backdrop */

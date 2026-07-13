@@ -1,6 +1,7 @@
 export type TaskSort = 'priority' | 'dueDate' | 'createdAt'
-export type TaskFilter = 'all' | 'dueToday' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
+export type TaskFilter = 'all' | 'dueToday' | 'dueTomorrow' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
 export type TaskViewMode = 'list' | 'grid'
+export type CalendarViewMode = 'month' | 'week'
 
 export interface TaskViewDefaults {
   sort: TaskSort
@@ -21,6 +22,7 @@ export interface CalendarViewDefaults {
 export interface CalendarViewState extends CalendarViewDefaults {
   projectFilter: string
   assigneeFilter: string
+  mode: CalendarViewMode
 }
 
 const TASK_DEFAULTS_KEY = 'focusclaw.taskViewDefaults'
@@ -51,6 +53,7 @@ export const CALENDAR_VIEW_STATE_DEFAULTS: CalendarViewState = {
   ...CALENDAR_VIEW_DEFAULTS,
   projectFilter: 'all',
   assigneeFilter: 'all',
+  mode: 'month',
 }
 
 function canUseStorage(): boolean {
@@ -154,6 +157,7 @@ export function getCalendarViewState(): CalendarViewState {
       showCompleted: parsed.showCompleted ?? defaults.showCompleted,
       projectFilter: parsed.projectFilter || 'all',
       assigneeFilter: parsed.assigneeFilter || 'all',
+      mode: parsed.mode === 'week' ? 'week' : 'month',
     }
   } catch {
     return { ...CALENDAR_VIEW_STATE_DEFAULTS, ...defaults }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { CalendarDays, Check, Plus, Settings, Smartphone } from 'lucide-react'
 import { getThemeLogoSrc, THEME_FAMILY_CHANGE_EVENT } from '@/lib/themeSettings'
@@ -24,6 +24,14 @@ const UPDATE_PREVIEW_TAG = 'v9999.0.0-preview'
 const UPDATE_PREVIEW_STORAGE_KEY = 'focusclaw.previewUpdate'
 const LATEST_RELEASE_STORAGE_KEY = 'focusclaw.latestReleaseTag'
 const NEW_TASK_EVENT = 'focusclaw:new-task'
+
+function BrandLogo({ src, className = '' }: { src: string; className?: string }) {
+  const style = { backgroundImage: `url("${src}")` } satisfies CSSProperties
+
+  return (
+    <span className={`fc-brand-logo-frame ${className}`} style={style} aria-hidden="true" />
+  )
+}
 
 function normalizeVersionTag(tag: string): number[] {
   return tag.replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10)).filter(Number.isFinite)
@@ -177,7 +185,7 @@ export function AppShell({
       {sidebarVisible ? (
         <aside className="hidden w-60 bg-[var(--bg-secondary)] border-r border-[var(--border)] lg:flex lg:flex-col">
           <Link to="/" className="fc-header-row px-6 border-b border-[var(--border)] flex items-center gap-2 text-white text-lg font-extrabold hover:bg-[var(--bg-elevated)]/40">
-            <img src={logoSrc} alt="" aria-hidden="true" loading="eager" decoding="sync" className="w-7 h-7 rounded-lg flex-shrink-0" />
+            <BrandLogo src={logoSrc} />
             <span>FocusClaw</span>
           </Link>
           {latestReleaseTag ? <div className="px-4 pt-4">{renderUpdateIndicator('w-full')}</div> : null}
@@ -224,7 +232,7 @@ export function AppShell({
       <header className="fc-mobile-topbar z-30 shrink-0 bg-[var(--bg-secondary)]/95 px-3 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-2 backdrop-blur-xl lg:hidden">
         <div className="mx-auto flex h-11 w-full max-w-md items-center justify-between gap-3">
           <Link to="/" className="fc-mobile-brand mr-auto flex min-w-0 items-center gap-2 rounded-lg pr-2 text-sm font-extrabold text-white">
-            <img src={logoSrc} alt="" aria-hidden="true" loading="eager" decoding="sync" className="h-7 w-7 flex-shrink-0 rounded-lg" />
+            <BrandLogo src={logoSrc} />
             <span className="truncate">FocusClaw</span>
           </Link>
           {latestReleaseTag ? <div className="shrink-0">{renderUpdateIndicator()}</div> : null}
@@ -265,7 +273,7 @@ export function AppShell({
       </nav>
 
       <div className="fc-portrait-lock" role="status" aria-live="polite">
-        <img src={logoSrc} alt="" aria-hidden="true" className="fc-portrait-lock-logo" />
+        <BrandLogo src={logoSrc} className="fc-portrait-lock-logo" />
         <Smartphone className="fc-portrait-lock-icon" aria-hidden="true" />
         <div className="fc-portrait-lock-copy">
           <p className="fc-portrait-lock-title">Rotate or resize your window</p>

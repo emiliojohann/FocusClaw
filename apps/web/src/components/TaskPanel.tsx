@@ -976,7 +976,7 @@ export function TaskPanel({
                                 onChange={(e) => setEditingCommentContent(e.target.value)}
                                 maxLength={COMMENT_MAX_LENGTH}
                                 rows={3}
-                                className="input text-xs"
+                                className="input text-xs fc-resizable-text-surface fc-comment-editor-surface"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === 'Escape') cancelEditingComment()
@@ -1030,7 +1030,7 @@ export function TaskPanel({
                       maxLength={COMMENT_MAX_LENGTH}
                       placeholder="Add a comment..."
                       rows={2}
-                      className="input text-xs pr-12"
+                      className="input text-xs pr-12 fc-resizable-text-surface fc-comment-editor-surface"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault()
@@ -1041,7 +1041,9 @@ export function TaskPanel({
                     <button
                       onClick={onAddComment}
                       disabled={submittingComment || !newComment.trim()}
-                      className="absolute right-2 bottom-2 btn btn-ghost p-1.5"
+                      className="absolute right-2 top-2 btn btn-ghost p-1.5"
+                      title="Send comment"
+                      aria-label="Send comment"
                     >
                       <Send className="w-3.5 h-3.5 text-[var(--accent)]" />
                     </button>

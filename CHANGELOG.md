@@ -1,5 +1,21 @@
 # Changelog
 
+## v2026.07.13 - 2026-07-13
+
+- Includes all FocusClaw changes since `v2026.07.03`, including the internal DEV increments `v2026.07.03.1`, `v2026.07.03.2`, and `v2026.07.03.3`.
+- Fixed OpenClaw and Hermes logo rendering so the app icon keeps a stable square footprint when switching between dark and light themes without adding any wrapper border or background.
+- Matched task description and task comment resize affordances by routing both through the same resizable field styling.
+- Added an optimized Hermes app logo preload so the blue theme logo does not flash on refresh.
+- Kept OpenClaw and Hermes logo assets warm across route changes so page switching does not recreate a cold visible logo image.
+- Removed the added route, Tasks, and Calendar fade transitions so filter and reset actions update directly.
+- Kept existing task content visible while refreshes run when data is already present.
+- Replaced the full task-area spinner on true cold loads with stable skeleton task cards.
+- Added a `Due Tomorrow` task status filter to the API and Tasks view, with focused API test coverage.
+- Added a Calendar Week view for focused Monday-through-Sunday planning alongside the existing Month view.
+- Increased desktop Calendar day capacity to show up to 10 visible task chips before collapsing the rest behind `+ X more`.
+- Matched Calendar and Tasks header/filter row heights so switching between them no longer nudges the page content.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.7.13` / `v2026.07.13`.
+
 ## v2026.07.03 - 2026-07-03
 
 ### Thanks

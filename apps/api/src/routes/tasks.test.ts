@@ -627,6 +627,74 @@ test('dueNextWeek filter returns tasks in the next Monday-first calendar week', 
   }
 })
 
+test('dueTomorrow filter returns tasks due on the next local calendar day', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Tomorrow Workspace', slug: `tomorrow-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+    const workspace = workspaceResponse.json()
+
+    const projectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Inbox' },
+    })
+    assert.equal(projectResponse.statusCode, 201)
+    const project = projectResponse.json()
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = addDays(today, 1)
+
+    const todayTask = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        projectId: project.id,
+        title: 'Due today',
+        dueDate: localDateKey(today),
+      },
+    })
+    assert.equal(todayTask.statusCode, 201)
+
+    const tomorrowTaskResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        projectId: project.id,
+        title: 'Due tomorrow',
+        dueDate: localDateKey(tomorrow),
+      },
+    })
+    assert.equal(tomorrowTaskResponse.statusCode, 201)
+    const tomorrowTask = tomorrowTaskResponse.json()
+
+    const dayAfterTomorrowTask = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        projectId: project.id,
+        title: 'Due later',
+        dueDate: localDateKey(addDays(tomorrow, 1)),
+      },
+    })
+    assert.equal(dayAfterTomorrowTask.statusCode, 201)
+
+    const listResponse = await server.inject({
+      method: 'GET',
+      url: `/api/tasks/project/${project.id}?filter=dueTomorrow`,
+    })
+    assert.equal(listResponse.statusCode, 200)
+    assert.deepEqual(listResponse.json().map((row: any) => row.id), [tomorrowTask.id])
+  } finally {
+    await server.close()
+  }
+})
+
 test('project task list includes subtask completion counts', async () => {
   const server = await createServer()
   try {

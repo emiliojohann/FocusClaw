@@ -228,6 +228,9 @@ function isTaskInDateFilter(task: Task, filter: TaskFilter): boolean {
   const tomorrow = new Date(today)
   tomorrow.setDate(tomorrow.getDate() + 1)
 
+  const dayAfterTomorrow = new Date(tomorrow)
+  dayAfterTomorrow.setDate(tomorrow.getDate() + 1)
+
   const weekStart = new Date(today)
   weekStart.setDate(today.getDate() - today.getDay())
   weekStart.setHours(0, 0, 0, 0)
@@ -240,6 +243,7 @@ function isTaskInDateFilter(task: Task, filter: TaskFilter): boolean {
 
   if (filter === 'pastDue') return due < today
   if (filter === 'dueToday') return due >= today && due < tomorrow
+  if (filter === 'dueTomorrow') return due >= tomorrow && due < dayAfterTomorrow
   if (filter === 'dueThisWeek') return due >= today && due < nextWeekStart
   if (filter === 'dueNextWeek') return due >= nextWeekStart && due < nextWeekEnd
   return true
@@ -328,9 +332,9 @@ export default function DashboardPage() {
   const [activeProject, setActiveProject] = useState(lastDashboardProject)
   const [projectFilter, setProjectFilter] = useState(taskViewState.projectFilter || lastDashboardProjectFilter)
   const [loading, setLoading] = useState(!initialDashboardCache || lastDashboardTasks.length === 0)
+  const [showColdLoadSkeleton, setShowColdLoadSkeleton] = useState(false)
   const [initialized, setInitialized] = useState(lastDashboardProjects.length > 0)
   const [initError, setInitError] = useState('')
-  const [emptyStateVisible, setEmptyStateVisible] = useState(false)
 
   const [showNewTaskForm, setShowNewTaskForm] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -489,6 +493,15 @@ export default function DashboardPage() {
 
   useEffect(() => { initWorkspace() }, [])
   useEffect(() => {
+    if (!loading || initialized) {
+      setShowColdLoadSkeleton(false)
+      return
+    }
+
+    const handle = window.setTimeout(() => setShowColdLoadSkeleton(true), 220)
+    return () => window.clearTimeout(handle)
+  }, [initialized, loading])
+  useEffect(() => {
     if (!initialized || !activeProject || projects.length === 0) return
     const projectIds = projectFilter === 'all'
       ? projects.map((project) => project.id)
@@ -609,7 +622,8 @@ export default function DashboardPage() {
   const loadTasks = async (options?: { sortOverride?: TaskSort; filterOverride?: TaskFilter; projectFilterOverride?: string; searchOverride?: string }) => {
     if (!activeProject) return
     try {
-      if (tasks.length === 0) setLoading(true)
+      const hasExistingTasks = tasks.length > 0
+      if (!hasExistingTasks) setLoading(true)
       const sortValue = options?.sortOverride ?? sort
       const filterValue = options?.filterOverride ?? filter
       const projectFilterValue = options?.projectFilterOverride ?? projectFilter
@@ -623,7 +637,9 @@ export default function DashboardPage() {
       const nextTasks = await fetchTasksForProjectIds(projectIds, sortValue, filterValue, searchValue)
       setCachedTasks(nextTasks)
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally {
+      setLoading(false)
+    }
   }
 
   const loadProjectTags = async () => {
@@ -956,16 +972,7 @@ export default function DashboardPage() {
   const hiddenTaskCount = Math.max(filteredTasks.length - visibleTasks.length, 0)
   const displayedStats = getTaskOverviewStats(filteredTasks)
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
-
-  useEffect(() => {
-    if (loading || filteredTasks.length > 0) {
-      setEmptyStateVisible(false)
-      return
-    }
-
-    const handle = window.setTimeout(() => setEmptyStateVisible(true), 250)
-    return () => window.clearTimeout(handle)
-  }, [loading, filteredTasks.length])
+  const showBlockingLoader = showColdLoadSkeleton && tasks.length === 0
 
   if (initError) {
     return (
@@ -1141,6 +1148,7 @@ export default function DashboardPage() {
               >
                 <option value="all">Status: All</option>
                 <option value="dueToday">Status: Today</option>
+                <option value="dueTomorrow">Status: Tomorrow</option>
                 <option value="dueThisWeek">Status: Week</option>
                 <option value="dueNextWeek">Status: Next Week</option>
                 <option value="pastDue">Status: Past Due</option>
@@ -1205,9 +1213,19 @@ export default function DashboardPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
-          {loading || (filteredTasks.length === 0 && !emptyStateVisible) ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="spinner" />
+          {showBlockingLoader ? (
+            <div className="fc-task-loading-skeleton" aria-hidden="true">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div className="fc-task-skeleton-card" key={index}>
+                  <div className="fc-task-skeleton-line fc-task-skeleton-line-title" />
+                  <div className="fc-task-skeleton-line" />
+                  <div className="fc-task-skeleton-meta">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredTasks.length === 0 ? (
             <div className="text-center py-20">

@@ -31,7 +31,7 @@ type SearchableTask = {
 type TaskListQuery = {
   sort?: 'priority' | 'dueDate' | 'createdAt'
   order?: 'asc' | 'desc'
-  filter?: 'all' | 'dueToday' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
+  filter?: 'all' | 'dueToday' | 'dueTomorrow' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
   includeArchived?: string
   q?: string
 }
@@ -493,6 +493,12 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const todayKey = localDateKey(today)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowKey = localDateKey(tomorrow)
+    const dayAfterTomorrow = new Date(tomorrow)
+    dayAfterTomorrow.setDate(tomorrow.getDate() + 1)
+    const dayAfterTomorrowKey = localDateKey(dayAfterTomorrow)
     const nextWeek = new Date(today)
     nextWeek.setDate(nextWeek.getDate() + 7)
     const nextWeekKey = localDateKey(nextWeek)
@@ -506,6 +512,11 @@ export async function taskRoutes(fastify: FastifyInstance) {
 
     if (filter === 'dueToday') {
       result = result.filter(t => isVisibleForDateFilter(t) && taskDueDateKey(t.dueDate) === todayKey)
+    } else if (filter === 'dueTomorrow') {
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= tomorrowKey && dueKey < dayAfterTomorrowKey
+      })
     } else if (filter === 'dueThisWeek') {
       result = result.filter(t => {
         const dueKey = taskDueDateKey(t.dueDate)
@@ -592,7 +603,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const { sort, order, filter, includeArchived, q } = request.query as {
       sort?: 'priority' | 'dueDate' | 'createdAt'
       order?: 'asc' | 'desc'
-      filter?: 'all' | 'dueToday' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
+      filter?: 'all' | 'dueToday' | 'dueTomorrow' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
       includeArchived?: string
       q?: string
     }
@@ -622,6 +633,12 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const todayKey = localDateKey(today)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowKey = localDateKey(tomorrow)
+    const dayAfterTomorrow = new Date(tomorrow)
+    dayAfterTomorrow.setDate(tomorrow.getDate() + 1)
+    const dayAfterTomorrowKey = localDateKey(dayAfterTomorrow)
     const nextWeek = new Date(today)
     nextWeek.setDate(nextWeek.getDate() + 7)
     const nextWeekKey = localDateKey(nextWeek)
@@ -640,6 +657,11 @@ export async function taskRoutes(fastify: FastifyInstance) {
     //       'archived' explicitly returns only archived tasks (completed tasks).
     if (filter === 'dueToday') {
       result = result.filter(t => isVisibleForDateFilter(t) && taskDueDateKey(t.dueDate) === todayKey)
+    } else if (filter === 'dueTomorrow') {
+      result = result.filter(t => {
+        const dueKey = taskDueDateKey(t.dueDate)
+        return isVisibleForDateFilter(t) && dueKey !== null && dueKey >= tomorrowKey && dueKey < dayAfterTomorrowKey
+      })
     } else if (filter === 'dueThisWeek') {
       result = result.filter(t => {
         const dueKey = taskDueDateKey(t.dueDate)

@@ -19,7 +19,7 @@ import {
   CalendarDays, AlertCircle, RefreshCw,
   ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X, ListTree, Paperclip, Repeat2
 } from 'lucide-react'
-import { getCalendarViewDefaults, getCalendarViewState, getOverviewPanelVisible, setCalendarViewState, setOverviewPanelVisible } from '@/lib/viewSettings'
+import { getCalendarViewDefaults, getCalendarViewState, getOverviewPanelVisible, setCalendarViewState, setOverviewPanelVisible, type CalendarViewMode } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
 import {
   ASSIGNEE_OPTIONS,
@@ -32,7 +32,7 @@ import {
   type AssigneeFilter,
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
-import { dueDateToLocalDateKey } from '@/lib/dates'
+import { dueDateToLocalDateKey, localDateKey } from '@/lib/dates'
 
 interface Task {
   id: string
@@ -131,7 +131,41 @@ const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: str
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-const MAX_VISIBLE_DAY_TASKS = 2
+const MAX_VISIBLE_DAY_TASKS = 10
+const MAX_VISIBLE_WEEK_TASKS = 10
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date)
+  next.setHours(0, 0, 0, 0)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+function dateFromKey(dateKey: string): Date {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function startOfMondayWeek(date: Date): Date {
+  const start = new Date(date)
+  start.setHours(0, 0, 0, 0)
+  const weekday = start.getDay()
+  const offset = weekday === 0 ? -6 : 1 - weekday
+  start.setDate(start.getDate() + offset)
+  return start
+}
+
+function formatWeekRange(start: Date, end: Date): string {
+  const sameYear = start.getFullYear() === end.getFullYear()
+  const sameMonth = sameYear && start.getMonth() === end.getMonth()
+  const startOptions: Intl.DateTimeFormatOptions = sameMonth
+    ? { month: 'short', day: 'numeric' }
+    : sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' }
+  const endOptions: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
+  return `${start.toLocaleDateString(undefined, startOptions)}-${end.toLocaleDateString(undefined, endOptions)}`
+}
 
 function AssigneeBadge({ assignee, compact = false }: { assignee?: string; compact?: boolean }) {
   const owner = getAssigneeOption(assignee)
@@ -238,19 +272,19 @@ function CalendarTaskChip({ task, onOpen }: { task: Task; onOpen: (task: Task) =
 }
 
 function CalendarDayCell({
-  day,
+  dateKey,
   isTodayDay,
   children,
   className = '',
 }: {
-  day: number
+  dateKey: string
   isTodayDay: boolean
   children: ReactNode
   className?: string
 }) {
   const { isOver, setNodeRef } = useDroppable({
-    id: `day:${day}`,
-    data: { day },
+    id: `date:${dateKey}`,
+    data: { dateKey },
   })
 
   return (
@@ -331,6 +365,7 @@ export default function CalendarPage() {
   const [activeProject, setActiveProject] = useState(lastCalendarProject)
   const [projectFilter, setProjectFilter] = useState(calendarViewState.projectFilter || lastCalendarProjectFilter)
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [calendarMode, setCalendarMode] = useState<CalendarViewMode>(calendarViewState.mode || 'month')
   const [loading, setLoading] = useState(!initialCalendarCache)
   const [initialized, setInitialized] = useState(lastCalendarProjects.length > 0)
   const [initError, setInitError] = useState('')
@@ -339,7 +374,7 @@ export default function CalendarPage() {
   const [overviewPanelVisible, setOverviewPanelVisibleState] = useState(getOverviewPanelVisible)
   const [moveError, setMoveError] = useState('')
   const [activeDragTaskId, setActiveDragTaskId] = useState('')
-  const [agendaDay, setAgendaDay] = useState<number | null>(null)
+  const [agendaDate, setAgendaDate] = useState<string | null>(null)
   const lastCalendarLoadKey = useRef('')
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
@@ -379,7 +414,8 @@ export default function CalendarPage() {
       setProjectFilter('all')
       lastCalendarProjectFilter = 'all'
       setCurrentDate(new Date())
-      setCalendarViewState({ showCompleted: defaults.showCompleted, assigneeFilter: 'all', projectFilter: 'all' })
+      setCalendarMode('month')
+      setCalendarViewState({ showCompleted: defaults.showCompleted, assigneeFilter: 'all', projectFilter: 'all', mode: 'month' })
       await loadTasks({ showCompletedOverride: defaults.showCompleted, projectFilterOverride: 'all' })
     } finally {
       window.setTimeout(() => setResetSpinning(false), 450)
@@ -633,9 +669,19 @@ export default function CalendarPage() {
   let startDayOfWeek = firstDayOfMonth.getDay() - 1
   if (startDayOfWeek < 0) startDayOfWeek = 6
   const trailingEmptyDays = (7 - ((startDayOfWeek + daysInMonth) % 7)) % 7
+  const monthDateKeys = Array.from({ length: daysInMonth }, (_, index) =>
+    localDateKey(new Date(year, month, index + 1))
+  )
+  const weekStart = startOfMondayWeek(currentDate)
+  const weekStartTime = weekStart.getTime()
+  const weekDates = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
+  const weekDateKeys = weekDates.map(localDateKey)
+  const weekEnd = weekDates[6]
+  const visibleDateKeys = calendarMode === 'week' ? weekDateKeys : monthDateKeys
+  const calendarTitle = calendarMode === 'week' ? formatWeekRange(weekStart, weekEnd) : `${MONTHS[month]} ${year}`
 
-  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1))
-  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1))
+  const prevCalendarPeriod = () => setCurrentDate(calendarMode === 'week' ? addDays(currentDate, -7) : new Date(year, month - 1, 1))
+  const nextCalendarPeriod = () => setCurrentDate(calendarMode === 'week' ? addDays(currentDate, 7) : new Date(year, month + 1, 1))
   const goToToday = () => setCurrentDate(new Date())
 
   const formatDateInput = (date: Date) =>
@@ -643,9 +689,12 @@ export default function CalendarPage() {
 
   const openNewTaskForm = () => {
     const today = new Date()
-    const defaultDueDate = today.getFullYear() === year && today.getMonth() === month
-      ? today
-      : new Date(year, month, 1)
+    const todayKey = localDateKey(today)
+    const defaultDueDate = calendarMode === 'week'
+      ? (weekDateKeys.includes(todayKey) ? today : weekStart)
+      : today.getFullYear() === year && today.getMonth() === month
+        ? today
+        : new Date(year, month, 1)
     setNewProjectId('')
     setNewDueDate(formatDateInput(defaultDueDate))
     setShowNewTaskForm(true)
@@ -658,19 +707,17 @@ export default function CalendarPage() {
     }
     window.addEventListener(NEW_TASK_EVENT, handleNewTask)
     return () => window.removeEventListener(NEW_TASK_EVENT, handleNewTask)
-  }, [initialized, projectFilter, activeProject, projects, year, month])
+  }, [initialized, projectFilter, activeProject, projects, year, month, calendarMode, weekStartTime])
 
   useEffect(() => {
     if (new URLSearchParams(location.search).get('newTask') !== '1') return
     if (!initialized) return
     openNewTaskForm()
     navigate('/calendar', { replace: true })
-  }, [location.search, initialized, projectFilter, activeProject, projects, year, month, navigate])
+  }, [location.search, initialized, projectFilter, activeProject, projects, year, month, calendarMode, weekStartTime, navigate])
 
-  const getTasksForDay = (day: number): Task[] => {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    return tasks.filter(t => dueDateToLocalDateKey(t.dueDate) === dateStr && assigneeMatchesFilter(t.assignee, assigneeFilter))
-  }
+  const getTasksForDate = (dateKey: string): Task[] =>
+    tasks.filter(t => dueDateToLocalDateKey(t.dueDate) === dateKey && assigneeMatchesFilter(t.assignee, assigneeFilter))
 
   const totalCalendarCells = startDayOfWeek + daysInMonth + trailingEmptyDays
   const getCalendarCellBorders = (cellIndex: number) => {
@@ -679,26 +726,20 @@ export default function CalendarPage() {
     return `${isLastColumn ? '' : 'border-r border-[var(--border)]'} ${isLastRow ? '' : 'border-b border-[var(--border)]'}`
   }
 
-  const formatAgendaDate = (day: number) =>
-    new Date(year, month, day).toLocaleDateString(undefined, {
+  const formatAgendaDate = (dateKey: string) =>
+    dateFromKey(dateKey).toLocaleDateString(undefined, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     })
 
-  const formatDateForDay = (day: number) =>
-    `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-
   const handleTaskDrop = async (event: DragEndEvent) => {
     const overId = event.over?.id
     const taskId = event.active.data.current?.taskId as string | undefined
     if (!overId || !taskId) return
-    const dayRaw = String(overId).replace('day:', '')
-    const nextDay = Number(dayRaw)
-    if (!Number.isInteger(nextDay) || nextDay < 1 || nextDay > daysInMonth) return
-
-    const nextDate = formatDateForDay(nextDay)
+    const nextDate = String(overId).startsWith('date:') ? String(overId).replace('date:', '') : ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) return
     const original = tasks.find((t) => t.id === taskId)
     if (!original?.dueDate) return
     const currentDateOnly = dueDateToLocalDateKey(original.dueDate)
@@ -731,7 +772,7 @@ export default function CalendarPage() {
   }
 
   const openTaskPanel = async (task: Task) => {
-    setAgendaDay(null)
+    setAgendaDate(null)
     setSelectedTask(task)
     setEditTitle(task.title); setEditDescription(task.description || '')
     setEditPriority(task.priority)
@@ -950,10 +991,7 @@ export default function CalendarPage() {
     } catch (err) { console.error(err) }
   }
 
-  const isToday = (day: number): boolean => {
-    const today = new Date()
-    return today.getFullYear() === year && today.getMonth() === month && today.getDate() === day
-  }
+  const isTodayDate = (dateKey: string): boolean => dateKey === localDateKey(new Date())
 
   const visibleCalendarTasks = tasks.filter((task) => assigneeMatchesFilter(task.assignee, assigneeFilter))
   const filteredOverviewTasks = overviewTasks
@@ -962,14 +1000,11 @@ export default function CalendarPage() {
   const displayedStats = getTaskOverviewStats(filteredOverviewTasks)
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
   const getProjectName = (task: Task) => (task.projectId ? projectNameById.get(task.projectId) : undefined) || 'Project'
-  const agendaTasks = agendaDay ? getTasksForDay(agendaDay).sort(compareAgendaTasks) : []
-  const mobileAgendaDays = Array.from({ length: daysInMonth }, (_, index) => {
-    const day = index + 1
-    return {
-      day,
-      tasks: getTasksForDay(day).sort(compareAgendaTasks),
-    }
-  }).filter(({ tasks }) => tasks.length > 0)
+  const agendaTasks = agendaDate ? getTasksForDate(agendaDate).sort(compareAgendaTasks) : []
+  const mobileAgendaDays = visibleDateKeys.map((dateKey) => ({
+    dateKey,
+    tasks: getTasksForDate(dateKey).sort(compareAgendaTasks),
+  })).filter(({ tasks }) => calendarMode === 'week' || tasks.length > 0)
   const showBlockingLoader = loading && visibleCalendarTasks.length > 0
 
   if (initError) {
@@ -1019,8 +1054,8 @@ export default function CalendarPage() {
               </button>
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-white">Calendar</h2>
-                <p className="fc-calendar-subtitle-full text-xs text-zinc-500 mt-0.5 truncate">{MONTHS[month]} {year} · {visibleCalendarTasks.filter((t: Task) => !t.archived).length} active · {visibleCalendarTasks.filter((t: Task) => t.archived).length} completed shown</p>
-                <p className="fc-calendar-subtitle-landscape text-xs text-zinc-500 mt-0.5 truncate">{MONTHS[month]} {year} · {visibleCalendarTasks.filter((t: Task) => !t.archived).length} active · {visibleCalendarTasks.filter((t: Task) => t.archived).length} completed shown</p>
+                <p className="fc-calendar-subtitle-full text-xs text-zinc-500 mt-0.5 truncate">{calendarTitle} · {visibleCalendarTasks.filter((t: Task) => !t.archived).length} active · {visibleCalendarTasks.filter((t: Task) => t.archived).length} completed shown</p>
+                <p className="fc-calendar-subtitle-landscape text-xs text-zinc-500 mt-0.5 truncate">{calendarTitle} · {visibleCalendarTasks.filter((t: Task) => !t.archived).length} active · {visibleCalendarTasks.filter((t: Task) => t.archived).length} completed shown</p>
                 {moveError && <p className="text-xs text-red-400 mt-1">{moveError}</p>}
               </div>
             </div>
@@ -1035,9 +1070,9 @@ export default function CalendarPage() {
               </button>
             </div>
           </div>
-          <div className="relative pb-3 md:pb-4">
+          <div className="pb-3 md:pb-4">
             <div
-              className="-mx-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap px-3 pb-1 pr-10 sm:mx-0 sm:gap-2 sm:px-0 sm:pr-8 fc-scrollbar-hidden"
+              className="-mx-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap px-3 pb-1 pr-10 sm:mx-0 sm:gap-2 sm:px-0 sm:pr-0 fc-scrollbar-hidden"
             >
               <button onClick={handleReset} className="btn btn-secondary text-xs fc-control !w-9 !p-0 shrink-0" title="Reset">
                 <RefreshCw
@@ -1076,12 +1111,32 @@ export default function CalendarPage() {
                 <option value="unassigned">Owner: Unassigned</option>
               </select>
               <button onClick={goToToday} className="btn btn-secondary text-xs fc-control shrink-0">Today</button>
+              <div className="flex h-9 shrink-0 items-center rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-0.5">
+                {(['month', 'week'] as CalendarViewMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setCalendarMode(mode)
+                      setAgendaDate(null)
+                      setCalendarViewState({ mode })
+                    }}
+                    className={`h-8 rounded-lg px-3 text-xs font-medium transition-colors ${
+                      calendarMode === mode
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'text-zinc-400 hover:bg-[var(--bg-elevated)] hover:text-zinc-200'
+                    }`}
+                  >
+                    {mode === 'month' ? 'Month' : 'Week'}
+                  </button>
+                ))}
+              </div>
               <div className="flex shrink-0 items-center rounded-xl border border-[var(--border)] bg-[rgba(34,197,94,0.06)]">
-                <button onClick={prevMonth} className="p-2 hover:bg-[var(--bg-card)] rounded-l-xl transition-colors">
+                <button onClick={prevCalendarPeriod} className="p-2 hover:bg-[var(--bg-card)] rounded-l-xl transition-colors">
                   <ChevronLeft className="w-4 h-4 text-zinc-400" />
                 </button>
-                <span className="px-3 text-white font-medium text-sm min-w-[128px] text-center sm:min-w-[140px] sm:px-4">{MONTHS[month]} {year}</span>
-                <button onClick={nextMonth} className="p-2 hover:bg-[var(--bg-card)] rounded-r-xl transition-colors">
+                <span className="px-3 text-white font-medium text-sm min-w-[128px] text-center sm:min-w-[140px] sm:px-4">{calendarTitle}</span>
+                <button onClick={nextCalendarPeriod} className="p-2 hover:bg-[var(--bg-card)] rounded-r-xl transition-colors">
                   <ChevronRight className="w-4 h-4 text-zinc-400" />
                 </button>
               </div>
@@ -1112,23 +1167,27 @@ export default function CalendarPage() {
                 {mobileAgendaDays.length === 0 ? (
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-6 text-center">
                     <CalendarDays className="mx-auto mb-3 h-6 w-6 text-[var(--accent)]" />
-                    <p className="text-sm font-medium text-white">No dated tasks this month</p>
+                    <p className="text-sm font-medium text-white">No dated tasks this {calendarMode}</p>
                     <p className="mt-1 text-xs text-zinc-500">Create a task with a due date or change filters.</p>
                   </div>
                 ) : (
-                  mobileAgendaDays.map(({ day, tasks }) => (
-                    <section key={day} className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3">
+                  mobileAgendaDays.map(({ dateKey, tasks }) => (
+                    <section key={dateKey} className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3">
                       <div className="mb-2 flex items-center justify-between gap-3">
                         <div>
-                          <h3 className={`text-sm font-semibold ${isToday(day) ? 'text-[var(--accent-hover)]' : 'text-white'}`}>{formatAgendaDate(day)}</h3>
+                          <h3 className={`text-sm font-semibold ${isTodayDate(dateKey) ? 'text-[var(--accent-hover)]' : 'text-white'}`}>{formatAgendaDate(dateKey)}</h3>
                           <p className="text-[11px] text-zinc-500">{tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</p>
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        {tasks.map((task) => (
+                      {tasks.length > 0 ? (
+                        <div className="space-y-2">
+                          {tasks.map((task) => (
                           <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} onOpen={openTaskPanel} />
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-xs text-zinc-500">No tasks</p>
+                      )}
                     </section>
                   ))
                 )}
@@ -1142,60 +1201,111 @@ export default function CalendarPage() {
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-7">
-                  {Array.from({ length: startDayOfWeek }).map((_, i) => (
-                    <div key={`empty-start-${i}`} className={`min-h-[120px] bg-[var(--bg-primary)] p-2 ${getCalendarCellBorders(i)}`} />
-                  ))}
+                  {calendarMode === 'month' ? (
+                    <div className="grid grid-cols-7">
+                      {Array.from({ length: startDayOfWeek }).map((_, i) => (
+                        <div key={`empty-start-${i}`} className={`min-h-[120px] bg-[var(--bg-primary)] p-2 ${getCalendarCellBorders(i)}`} />
+                      ))}
 
-                  {Array.from({ length: daysInMonth }).map((_, i) => {
-                    const day = i + 1
-                    const cellIndex = startDayOfWeek + i
-                    const dayTasks = getTasksForDay(day).sort(compareAgendaTasks)
-                    const visibleTasks = dayTasks.slice(0, MAX_VISIBLE_DAY_TASKS)
-                    const hiddenTasks = dayTasks.slice(MAX_VISIBLE_DAY_TASKS)
-                    return (
-                      <CalendarDayCell key={day} day={day} isTodayDay={isToday(day)} className={getCalendarCellBorders(cellIndex)}>
-                        <div className={`text-sm font-medium mb-2 ${isToday(day) ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>{day}</div>
-                        <div className="space-y-1">
-                          {visibleTasks.map((task) => (
-                            <CalendarTaskChip key={task.id} task={task} onOpen={openTaskPanel} />
-                          ))}
-                          {hiddenTasks.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                setAgendaDay(day)
-                              }}
-                              className="w-full rounded-md px-2 py-1 text-left text-[10px] font-medium text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-300"
-                              title={`Show all ${dayTasks.length} tasks for ${formatAgendaDate(day)}`}
-                            >
-                              +{hiddenTasks.length} more
-                            </button>
-                          )}
-                          {activeDragTaskId && dayTasks.length === 0 && (
-                            <div className="h-6 rounded-md border border-dashed border-[rgba(245,61,45,0.28)] bg-[rgba(245,61,45,0.05)]" />
-                          )}
-                        </div>
-                      </CalendarDayCell>
-                    )
-                  })}
+                      {monthDateKeys.map((dateKey, i) => {
+                        const day = i + 1
+                        const cellIndex = startDayOfWeek + i
+                        const dayTasks = getTasksForDate(dateKey).sort(compareAgendaTasks)
+                        const visibleTasks = dayTasks.slice(0, MAX_VISIBLE_DAY_TASKS)
+                        const hiddenTasks = dayTasks.slice(MAX_VISIBLE_DAY_TASKS)
+                        return (
+                          <CalendarDayCell key={dateKey} dateKey={dateKey} isTodayDay={isTodayDate(dateKey)} className={getCalendarCellBorders(cellIndex)}>
+                            <div className={`text-sm font-medium mb-2 ${isTodayDate(dateKey) ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>{day}</div>
+                            <div className="space-y-1">
+                              {visibleTasks.map((task) => (
+                                <CalendarTaskChip key={task.id} task={task} onOpen={openTaskPanel} />
+                              ))}
+                              {hiddenTasks.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setAgendaDate(dateKey)
+                                  }}
+                                  className="w-full rounded-md px-2 py-1 text-left text-[10px] font-medium text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-300"
+                                  title={`Show all ${dayTasks.length} tasks for ${formatAgendaDate(dateKey)}`}
+                                >
+                                  +{hiddenTasks.length} more
+                                </button>
+                              )}
+                              {activeDragTaskId && dayTasks.length === 0 && (
+                                <div className="h-6 rounded-md border border-dashed border-[rgba(245,61,45,0.28)] bg-[rgba(245,61,45,0.05)]" />
+                              )}
+                            </div>
+                          </CalendarDayCell>
+                        )
+                      })}
 
-                  {Array.from({ length: trailingEmptyDays }).map((_, i) => (
-                    <div
-                      key={`empty-end-${i}`}
-                      className={`min-h-[120px] bg-[var(--bg-primary)] p-2 ${getCalendarCellBorders(startDayOfWeek + daysInMonth + i)}`}
-                    />
-                  ))}
-                  </div>
+                      {Array.from({ length: trailingEmptyDays }).map((_, i) => (
+                        <div
+                          key={`empty-end-${i}`}
+                          className={`min-h-[120px] bg-[var(--bg-primary)] p-2 ${getCalendarCellBorders(startDayOfWeek + daysInMonth + i)}`}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-7">
+                      {weekDateKeys.map((dateKey, index) => {
+                        const date = dateFromKey(dateKey)
+                        const dayTasks = getTasksForDate(dateKey).sort(compareAgendaTasks)
+                        const visibleTasks = dayTasks.slice(0, MAX_VISIBLE_WEEK_TASKS)
+                        const hiddenTasks = dayTasks.slice(MAX_VISIBLE_WEEK_TASKS)
+                        const isLastColumn = index === weekDateKeys.length - 1
+                        return (
+                          <CalendarDayCell
+                            key={dateKey}
+                            dateKey={dateKey}
+                            isTodayDay={isTodayDate(dateKey)}
+                            className={`min-h-[360px] ${isLastColumn ? '' : 'border-r border-[var(--border)]'}`}
+                          >
+                            <div className="mb-3 flex items-start justify-between gap-2">
+                              <div>
+                                <div className={`text-sm font-semibold ${isTodayDate(dateKey) ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}>{date.getDate()}</div>
+                                <div className="text-[10px] uppercase tracking-wider text-zinc-600">{date.toLocaleDateString(undefined, { month: 'short' })}</div>
+                              </div>
+                              <span className="rounded-md bg-[var(--bg-elevated)] px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
+                                {dayTasks.length}
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              {visibleTasks.map((task) => (
+                                <CalendarTaskChip key={task.id} task={task} onOpen={openTaskPanel} />
+                              ))}
+                              {hiddenTasks.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setAgendaDate(dateKey)
+                                  }}
+                                  className="w-full rounded-md px-2 py-1 text-left text-[10px] font-medium text-zinc-500 transition-colors hover:bg-[var(--bg-elevated)] hover:text-zinc-300"
+                                  title={`Show all ${dayTasks.length} tasks for ${formatAgendaDate(dateKey)}`}
+                                >
+                                  +{hiddenTasks.length} more
+                                </button>
+                              )}
+                              {activeDragTaskId && dayTasks.length === 0 && (
+                                <div className="h-6 rounded-md border border-dashed border-[rgba(245,61,45,0.28)] bg-[rgba(245,61,45,0.05)]" />
+                              )}
+                            </div>
+                          </CalendarDayCell>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               </DndContext>
             </>
           )}
         </div>
-      {agendaDay && (
+      {agendaDate && (
         <>
-          <div className="fixed inset-0 bg-black/60 z-40 backdrop" onClick={() => setAgendaDay(null)} />
+          <div className="fixed inset-0 bg-black/60 z-40 backdrop" onClick={() => setAgendaDate(null)} />
           <div
             role="dialog"
             aria-modal="true"
@@ -1209,10 +1319,10 @@ export default function CalendarPage() {
                   <h3 id="calendar-agenda-title" className="text-sm font-semibold text-white">Day Agenda</h3>
                 </div>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {formatAgendaDate(agendaDay)} · {agendaTasks.length} {agendaTasks.length === 1 ? 'task' : 'tasks'}
+                  {formatAgendaDate(agendaDate)} · {agendaTasks.length} {agendaTasks.length === 1 ? 'task' : 'tasks'}
                 </p>
               </div>
-              <button onClick={() => setAgendaDay(null)} className="btn btn-ghost p-1.5" title="Close agenda">
+              <button onClick={() => setAgendaDate(null)} className="btn btn-ghost p-1.5" title="Close agenda">
                 <X className="w-4 h-4" />
               </button>
             </div>

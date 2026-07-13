@@ -723,6 +723,7 @@ export default function SettingsPage() {
                 <select value={defaultFilter} onChange={(e) => setDefaultFilter(e.target.value as TaskFilter)} className="input text-xs fc-control fc-select-control w-full">
                   <option value="all">Active Tasks</option>
                   <option value="dueToday">Due Today</option>
+                  <option value="dueTomorrow">Due Tomorrow</option>
                   <option value="dueThisWeek">Due This Week</option>
                   <option value="dueNextWeek">Due Next Week</option>
                   <option value="pastDue">Past Due</option>

@@ -6,8 +6,12 @@ const THEME_KEY = 'focusclaw.theme.preference'
 const THEME_FAMILY_KEY = 'focusclaw.theme.family'
 const DEFAULT_THEME: ThemePreference = 'dark'
 const DEFAULT_THEME_FAMILY: ThemeFamily = 'openclaw'
-const DEFAULT_LOGO_SRC = '/fc-logo-app.png'
-const HERMES_LOGO_SRC = '/grok-hermes.png'
+export const THEME_LOGO_SOURCES = {
+  openclaw: '/fc-logo-app.png',
+  hermes: '/grok-hermes-app.png',
+} as const satisfies Record<ThemeFamily, string>
+const DEFAULT_LOGO_SRC = THEME_LOGO_SOURCES.openclaw
+const HERMES_LOGO_SRC = THEME_LOGO_SOURCES.hermes
 let themeTransitionReleaseTimer: number | undefined
 
 export const THEME_FAMILY_CHANGE_EVENT = 'focusclaw:theme-family-change'
@@ -91,6 +95,18 @@ function suppressThemeTransitions(): void {
   }, 80)
 }
 
+function preloadThemeLogos(): void {
+  if (typeof window === 'undefined') return
+  Object.values(THEME_LOGO_SOURCES).forEach((src) => {
+    const image = new Image()
+    image.decoding = 'sync'
+    image.src = src
+    image.decode?.().catch(() => {
+      // Logo preloading should never affect app startup.
+    })
+  })
+}
+
 export function applyThemePreference(preference = getThemePreference()): ResolvedTheme {
   const resolvedTheme = resolveTheme(preference)
   if (typeof document !== 'undefined') {
@@ -134,6 +150,7 @@ export function setThemeFamily(family: ThemeFamily): ThemeFamily {
 }
 
 export function initializeTheme(): void {
+  preloadThemeLogos()
   applyThemePreference()
   applyThemeFamily()
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
