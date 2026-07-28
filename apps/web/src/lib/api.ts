@@ -165,6 +165,11 @@ export const taskApi = {
   // Delete
   delete: (taskId: string) =>
     request<void>(`/tasks/${taskId}`, { method: 'DELETE', headers: {} }),
+  bulkDelete: (taskIds: string[]) =>
+    request<{ deletedCount: number }>('/tasks/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ taskIds }),
+    }),
 
   // Subtasks
   deleteSubtask: (subtaskId: string) =>

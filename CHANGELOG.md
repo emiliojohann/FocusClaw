@@ -1,5 +1,17 @@
 # Changelog
 
+## v2026.07.13.3 - 2026-07-28
+
+- Includes all FocusClaw changes since `v2026.07.13`, including the internal DEV increments `v2026.07.13.1` and `v2026.07.13.2`.
+- Fixed the selected Calendar Month/Week label so it remains white in light mode.
+- Matched the inner Month/Week button corner radius concentrically to the surrounding segmented-control field.
+- Made the Month/Week segmented control spacing a consistent 2px on every side.
+- Fixed the Past Due task filter so completed tasks no longer appear.
+- Added multi-select bulk task deletion for grid and list views, with confirmation, descendant cleanup, and API test coverage.
+- Updated vulnerable production and development dependencies, including React 19.2.8, React Router 8.3, ESLint 10.8, TypeScript ESLint 8.65, and compatible React lint plugins.
+- Restored a clean dependency audit with zero known vulnerabilities.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.7.13-3` / `v2026.07.13.3`.
+
 ## v2026.07.13 - 2026-07-13
 
 - Includes all FocusClaw changes since `v2026.07.03`, including the internal DEV increments `v2026.07.03.1`, `v2026.07.03.2`, and `v2026.07.03.3`.

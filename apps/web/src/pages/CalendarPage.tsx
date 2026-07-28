@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router'
 import { taskApi } from '@/lib/api'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
@@ -1121,9 +1121,9 @@ export default function CalendarPage() {
                       setAgendaDate(null)
                       setCalendarViewState({ mode })
                     }}
-                    className={`h-8 rounded-lg px-3 text-xs font-medium transition-colors ${
+                    className={`h-[30px] rounded-[9px] px-3 text-xs font-medium transition-colors ${
                       calendarMode === mode
-                        ? 'bg-[var(--accent)] text-white'
+                        ? 'fc-calendar-mode-active bg-[var(--accent)] text-white'
                         : 'text-zinc-400 hover:bg-[var(--bg-elevated)] hover:text-zinc-200'
                     }`}
                   >

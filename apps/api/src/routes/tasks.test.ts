@@ -903,3 +903,72 @@ test('explicit recurring option creates recurring tasks', async () => {
     await server.close()
   }
 })
+
+test('bulk delete removes selected tasks and their related records only', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Bulk Delete Workspace', slug: `bulk-delete-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+
+    const projectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspaceResponse.json().id, name: 'Inbox' },
+    })
+    assert.equal(projectResponse.statusCode, 201)
+    const project = projectResponse.json()
+
+    const selectedResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: project.id, title: 'Delete me' },
+    })
+    const retainedResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: project.id, title: 'Keep me' },
+    })
+    assert.equal(selectedResponse.statusCode, 201)
+    assert.equal(retainedResponse.statusCode, 201)
+    const selected = selectedResponse.json()
+    const retained = retainedResponse.json()
+
+    assert.equal((await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${selected.id}/subtasks`,
+      payload: { title: 'Delete child' },
+    })).statusCode, 201)
+    assert.equal((await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${selected.id}/comments`,
+      payload: { content: 'Delete comment' },
+    })).statusCode, 201)
+    assert.equal((await server.inject({
+      method: 'POST',
+      url: `/api/tasks/${selected.id}/attachments`,
+      payload: { name: 'Delete metadata', kind: 'file', uri: '/tmp/focusclaw-fixtures/delete-me.txt' },
+    })).statusCode, 201)
+
+    const deleted = await server.inject({
+      method: 'POST',
+      url: '/api/tasks/bulk-delete',
+      payload: { taskIds: [selected.id, selected.id] },
+    })
+    assert.equal(deleted.statusCode, 200)
+    assert.equal(deleted.json().deletedCount, 1)
+
+    assert.equal((await server.inject({ method: 'GET', url: `/api/tasks/${selected.id}` })).statusCode, 404)
+    assert.equal((await server.inject({ method: 'GET', url: `/api/tasks/${retained.id}` })).statusCode, 200)
+    assert.deepEqual((await server.inject({ method: 'GET', url: `/api/tasks/${selected.id}/comments` })).json(), [])
+    assert.equal((await server.inject({ method: 'GET', url: `/api/tasks/${selected.id}/attachments` })).statusCode, 404)
+
+    const remaining = (await server.inject({ method: 'GET', url: `/api/tasks/project/${project.id}` })).json()
+    assert.deepEqual(remaining.map((task: any) => task.id), [retained.id])
+  } finally {
+    await server.close()
+  }
+})

@@ -5,7 +5,7 @@ import { constants as fsConstants } from 'node:fs'
 import { platform } from 'node:os'
 import { basename, extname } from 'node:path'
 import { promisify } from 'node:util'
-import { db } from '../db'
+import { db, sqlite } from '../db'
 import { tasks, statusDefinitions, activityLog, projects, workspaces, taskAttachments } from '../db/schema'
 import { eq, asc, desc, and, isNull, inArray } from 'drizzle-orm'
 import { hydrateTaskWithTags, hydrateTasksWithTags, replaceTaskTags } from '../lib/taskTags'
@@ -38,6 +38,28 @@ type TaskListQuery = {
 
 function isValidUUID(s: string): boolean {
   return UUID_REGEX.test(s)
+}
+
+function deleteTasksByIds(taskIds: string[]): number {
+  const uniqueIds = [...new Set(taskIds)]
+  if (uniqueIds.length === 0) return 0
+
+  const placeholders = uniqueIds.map(() => '?').join(', ')
+  const countSelectedTasks = sqlite.prepare(`SELECT COUNT(*) AS count FROM tasks WHERE id IN (${placeholders})`)
+  const deleteTasks = sqlite.prepare(`
+    WITH RECURSIVE task_tree(id) AS (
+      SELECT id FROM tasks WHERE id IN (${placeholders})
+      UNION
+      SELECT child.id FROM tasks child JOIN task_tree parent ON child.parent_id = parent.id
+    )
+    DELETE FROM tasks WHERE id IN (SELECT id FROM task_tree)
+  `)
+  const transaction = sqlite.transaction(() => {
+    const { count } = countSelectedTasks.get(...uniqueIds) as { count: number }
+    deleteTasks.run(...uniqueIds)
+    return count
+  })
+  return transaction()
 }
 
 function addSubtaskCounts<T extends { id: string }>(taskRows: T[], allProjectTasks: Array<{ parentId: string | null; archived: boolean }>): T[] {
@@ -719,6 +741,24 @@ export async function taskRoutes(fastify: FastifyInstance) {
     return reply.send(hydrated)
   })
 
+  // Delete multiple tasks in one transaction. Related task metadata cascades with each task.
+  fastify.post('/bulk-delete', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { taskIds } = (request.body || {}) as { taskIds?: unknown }
+
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      return reply.status(400).send({ error: 'taskIds must be a non-empty array' })
+    }
+    if (taskIds.length > 5000) {
+      return reply.status(400).send({ error: 'A maximum of 5000 tasks can be deleted at once' })
+    }
+    if (!taskIds.every((taskId) => typeof taskId === 'string' && isValidUUID(taskId))) {
+      return reply.status(400).send({ error: 'Every task ID must be a valid UUID' })
+    }
+
+    const deletedCount = deleteTasksByIds(taskIds)
+    return reply.send({ deletedCount })
+  })
+
   fastify.post('/attachments/pick-local', async (request: FastifyRequest, reply: FastifyReply) => {
     const { kind } = (request.body ?? {}) as { kind?: string }
     try {
@@ -968,8 +1008,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Task not found' })
     }
 
-    await db.delete(tasks).where(eq(tasks.parentId, id))
-    await db.delete(tasks).where(eq(tasks.id, id))
+    deleteTasksByIds([id])
 
     return reply.status(204).send()
   })

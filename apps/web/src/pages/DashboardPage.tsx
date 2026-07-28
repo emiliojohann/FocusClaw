@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router'
 import { taskApi, tagApi } from '@/lib/api'
 import {
   Check, Plus, X,
   ChevronRight, AlertCircle, RefreshCw, Clock, Repeat2,
-  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip
+  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip, ListChecks, Trash2
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
@@ -369,6 +369,12 @@ export default function DashboardPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null)
   const [deletingTask, setDeletingTask] = useState(false)
+  const [bulkSelectionMode, setBulkSelectionMode] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
+  const [bulkDeletePending, setBulkDeletePending] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDeleteError, setBulkDeleteError] = useState('')
+  const [bulkDeleteMessage, setBulkDeleteMessage] = useState('')
   const [panelLoading, setPanelLoading] = useState(false)
   const [comments, setComments] = useState<CommentEntry[]>([])
   const [attachments, setAttachments] = useState<AttachmentEntry[]>([])
@@ -467,6 +473,9 @@ export default function DashboardPage() {
   const handleReset = async () => {
     try {
       setResetSpinning(true)
+      setBulkSelectionMode(false)
+      setSelectedTaskIds(new Set())
+      setBulkDeletePending(false)
       const defaults = getTaskViewDefaults()
       setSort(defaults.sort)
       setFilter(defaults.filter)
@@ -512,6 +521,12 @@ export default function DashboardPage() {
   }, [initialized, activeProject, projectFilter, sort, filter, debouncedSearchQuery, projects])
   useEffect(() => { if (initialized && activeProject && projects.length > 0) loadProjectTags() }, [initialized, activeProject, projectFilter, selectedTask, projects])
   useEffect(() => { setVisibleTaskCount(TASK_VISIBLE_INCREMENT) }, [projectFilter, sort, filter, tagFilter, assigneeFilter, debouncedSearchQuery])
+  useEffect(() => {
+    setBulkSelectionMode(false)
+    setSelectedTaskIds(new Set())
+    setBulkDeletePending(false)
+    setBulkDeleteError('')
+  }, [projectFilter, sort, filter, tagFilter, assigneeFilter, debouncedSearchQuery])
   useEffect(() => {
     const handle = window.setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 200)
     return () => window.clearTimeout(handle)
@@ -600,7 +615,7 @@ export default function DashboardPage() {
         sort: sortValue,
         order: sortOrder,
         filter: filterValue,
-        includeArchived: filterValue !== 'archived',
+        includeArchived: filterValue !== 'archived' && filterValue !== 'pastDue',
         search: searchValue,
       })
     ))
@@ -759,6 +774,63 @@ export default function DashboardPage() {
   const requestDeleteTask = () => {
     if (!selectedTask) return
     setTaskPendingDelete(selectedTask)
+  }
+
+  const toggleBulkSelectionMode = () => {
+    setBulkSelectionMode((active) => !active)
+    setSelectedTask(null)
+    setSelectedTaskIds(new Set())
+    setBulkDeletePending(false)
+    setBulkDeleteError('')
+  }
+
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds((current) => {
+      const next = new Set(current)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  const cancelBulkDelete = () => {
+    if (bulkDeleting) return
+    setBulkDeletePending(false)
+    setBulkDeleteError('')
+  }
+
+  const handleBulkDelete = async () => {
+    const taskIds = [...selectedTaskIds]
+    if (taskIds.length === 0) return
+
+    setBulkDeleting(true)
+    setBulkDeleteError('')
+    try {
+      const { deletedCount } = await taskApi.bulkDelete(taskIds)
+      setCachedTasks((current) => {
+        const deletedIds = new Set(selectedTaskIds)
+        let foundDescendant = true
+        while (foundDescendant) {
+          foundDescendant = false
+          for (const task of current) {
+            if (task.parentId && deletedIds.has(task.parentId) && !deletedIds.has(task.id)) {
+              deletedIds.add(task.id)
+              foundDescendant = true
+            }
+          }
+        }
+        return current.filter((task) => !deletedIds.has(task.id))
+      })
+      setBulkDeletePending(false)
+      setBulkSelectionMode(false)
+      setSelectedTaskIds(new Set())
+      setBulkDeleteMessage(`${deletedCount} ${deletedCount === 1 ? 'task' : 'tasks'} deleted`)
+      window.setTimeout(() => setBulkDeleteMessage(''), 3000)
+    } catch (err) {
+      setBulkDeleteError(err instanceof Error ? err.message : 'Could not delete the selected tasks')
+    } finally {
+      setBulkDeleting(false)
+    }
   }
 
   const closeTaskPanel = () => {
@@ -1080,6 +1152,17 @@ export default function DashboardPage() {
           </div>
           <div className="pb-3 md:pb-4">
             <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap px-3 pb-1 pr-10 sm:mx-0 sm:gap-2 sm:px-0 sm:pr-0 fc-scrollbar-hidden">
+              <button
+                type="button"
+                onClick={toggleBulkSelectionMode}
+                disabled={!initialized || filteredTasks.length === 0}
+                className={`btn text-xs fc-control !w-9 !p-0 shrink-0 ${bulkSelectionMode ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'btn-secondary'}`}
+                aria-pressed={bulkSelectionMode}
+                aria-label={bulkSelectionMode ? 'Cancel task selection' : 'Select tasks'}
+                title={bulkSelectionMode ? 'Cancel task selection' : 'Select tasks'}
+              >
+                {bulkSelectionMode ? <X className="h-3.5 w-3.5" /> : <ListChecks className="h-3.5 w-3.5" />}
+              </button>
               <button onClick={handleReset} className="btn btn-secondary text-xs fc-control !w-9 !p-0 shrink-0" title="Reset">
                 <RefreshCw
                   className="w-3.5 h-3.5"
@@ -1213,6 +1296,30 @@ export default function DashboardPage() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
+          {bulkSelectionMode ? (
+            <div className="sticky top-0 z-30 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)]/95 p-3 shadow-xl backdrop-blur-xl">
+              <span className="mr-auto text-xs font-medium text-zinc-300">
+                {selectedTaskIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedTaskIds(new Set())}
+                disabled={selectedTaskIds.size === 0}
+                className="btn btn-secondary text-xs font-normal"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBulkDeleteError(''); setBulkDeletePending(true) }}
+                disabled={selectedTaskIds.size === 0}
+                className="btn text-xs font-normal bg-red-500/15 text-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </button>
+            </div>
+          ) : null}
           {showBlockingLoader ? (
             <div className="fc-task-loading-skeleton" aria-hidden="true">
               {Array.from({ length: 6 }).map((_, index) => (
@@ -1251,15 +1358,24 @@ export default function DashboardPage() {
                 const priority = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG[4]
                 const PriorityIcon = priority.icon
                 const isCompleted = !!task.archived
+                const isSelected = selectedTaskIds.has(task.id)
                 return (
                   <div
                     key={task.id}
-                    onClick={() => openTaskPanel(task)}
+                    onClick={() => bulkSelectionMode ? toggleTaskSelection(task.id) : openTaskPanel(task)}
                     className={`card card-hover p-4 min-h-[150px] flex flex-col gap-3 cursor-pointer transition-opacity ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''}`}
                     style={{ borderLeft: `4px solid ${isCompleted ? 'rgba(113,113,122,0.75)' : priority.color}` }}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      {isCompleted ? (
+                      {bulkSelectionMode ? (
+                        <div
+                          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border-2 transition-colors sm:h-5 sm:w-5 ${isSelected ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-zinc-600'}`}
+                          role="checkbox"
+                          aria-checked={isSelected}
+                        >
+                          {isSelected ? <Check className="h-3 w-3 text-white" /> : null}
+                        </div>
+                      ) : isCompleted ? (
                         <div className="w-5 h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
                           <Check className="w-3 h-3 text-zinc-500" />
                         </div>
@@ -1320,15 +1436,24 @@ export default function DashboardPage() {
                 const priority = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG[4]
                 const PriorityIcon = priority.icon
                 const isCompleted = !!task.archived
+                const isSelected = selectedTaskIds.has(task.id)
                 return (
                   <div
                     key={task.id}
-                    onClick={() => openTaskPanel(task)}
+                    onClick={() => bulkSelectionMode ? toggleTaskSelection(task.id) : openTaskPanel(task)}
                     className={`card card-hover p-3 sm:p-4 cursor-pointer transition-opacity ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''}`}
                     style={{ borderLeft: `4px solid ${isCompleted ? 'rgba(113,113,122,0.75)' : priority.color}` }}
                   >
                     <div className="flex items-start gap-3">
-                      {isCompleted ? (
+                      {bulkSelectionMode ? (
+                        <div
+                          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border-2 transition-colors sm:h-5 sm:w-5 ${isSelected ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-zinc-600'}`}
+                          role="checkbox"
+                          aria-checked={isSelected}
+                        >
+                          {isSelected ? <Check className="h-3 w-3 text-white" /> : null}
+                        </div>
+                      ) : isCompleted ? (
                         <div className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
                           <Check className="w-3 h-3 text-zinc-500" />
                         </div>
@@ -1612,6 +1737,54 @@ export default function DashboardPage() {
             </div>
           </div>
         </>
+      ) : null}
+      {bulkDeletePending && selectedTaskIds.size > 0 ? (
+        <>
+          <div className="fixed inset-0 bg-black/70 z-[220] backdrop" onClick={cancelBulkDelete} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-delete-task-title"
+            className="fixed top-1/2 left-1/2 z-[230] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+              <h3 id="bulk-delete-task-title" className="text-sm font-semibold text-white">
+                Delete {selectedTaskIds.size} {selectedTaskIds.size === 1 ? 'Task' : 'Tasks'}
+              </h3>
+              <button onClick={cancelBulkDelete} className="btn btn-ghost p-1.5" aria-label="Cancel bulk task deletion" disabled={bulkDeleting}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <p className="text-sm leading-5 text-zinc-300">
+                Permanently delete {selectedTaskIds.size} selected {selectedTaskIds.size === 1 ? 'task' : 'tasks'}?
+              </p>
+              <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto text-xs text-zinc-400">
+                {filteredTasks.filter((task) => selectedTaskIds.has(task.id)).slice(0, 5).map((task) => (
+                  <li key={task.id} className="truncate">• {task.title}</li>
+                ))}
+                {selectedTaskIds.size > 5 ? <li className="text-zinc-500">• and {selectedTaskIds.size - 5} more</li> : null}
+              </ul>
+              <p className="mt-3 text-xs leading-5 text-zinc-500">
+                This also removes subtasks, comments, tag links, and attachment metadata. Linked files remain untouched.
+              </p>
+              {bulkDeleteError ? <p className="mt-3 text-xs text-red-300">{bulkDeleteError}</p> : null}
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button onClick={cancelBulkDelete} className="btn btn-secondary w-full text-xs" disabled={bulkDeleting}>
+                  Cancel
+                </button>
+                <button onClick={handleBulkDelete} className="btn w-full text-xs bg-red-500/15 text-red-300" disabled={bulkDeleting}>
+                  {bulkDeleting ? 'Deleting...' : `Delete ${selectedTaskIds.size} ${selectedTaskIds.size === 1 ? 'Task' : 'Tasks'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+      {bulkDeleteMessage ? (
+        <div className="fixed bottom-5 left-1/2 z-[240] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-xs font-medium text-[var(--success)] shadow-xl" role="status">
+          {bulkDeleteMessage}
+        </div>
       ) : null}
     </AppShell>
   )

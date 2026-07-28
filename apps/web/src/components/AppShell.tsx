@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { CalendarDays, Check, Plus, Settings, Smartphone } from 'lucide-react'
 import { getThemeLogoSrc, THEME_FAMILY_CHANGE_EVENT } from '@/lib/themeSettings'
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_URL } from '@/lib/version'

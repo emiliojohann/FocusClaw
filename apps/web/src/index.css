@@ -703,7 +703,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 }
 
 :root[data-theme='light'] .btn-primary,
-:root[data-theme='light'] .fc-mobile-nav-item-active {
+:root[data-theme='light'] .fc-mobile-nav-item-active,
+:root[data-theme='light'] .fc-calendar-mode-active {
   color: #fff !important;
 }
 

@@ -35,6 +35,7 @@ The plugin should keep these summaries compact by default: group by project, sho
 | `GET` | `/api/tasks/:id` | Get task |
 | `PATCH` | `/api/tasks/:id` | Update task fields |
 | `DELETE` | `/api/tasks/:id` | Delete task |
+| `POST` | `/api/tasks/bulk-delete` | Delete up to 5,000 tasks and their related records in one transaction |
 | `POST` | `/api/tasks/:id/complete` | Mark task complete |
 | `GET` | `/api/tasks/:id/comments` | List comments |
 | `POST` | `/api/tasks/:id/comments` | Add comment |
