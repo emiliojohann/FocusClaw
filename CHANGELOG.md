@@ -1,5 +1,23 @@
 # Changelog
 
+## v2026.08.05 - 2026-08-05
+
+### Thanks
+
+Special thanks to [BeardedChop](https://github.com/BeardedChop) for identifying and fixing the native dependency install-policy issue.
+
+- Approved the required install scripts for `better-sqlite3@12.9.0`, `esbuild@0.28.1`, and the macOS-specific `fsevents@2.3.3` using npm's version-pinned `allowScripts` policy.
+- Restored clean fresh installs under npm 11 and forward compatibility with npm 12's stricter dependency lifecycle-script enforcement.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.5` / `v2026.08.05`.
+
+## v2026.08.04 - 2026-08-04
+
+- Changed current and future FocusClaw releases from MIT to `AGPL-3.0-only`; releases published before August 4, 2026 retain their original MIT rights.
+- Updated `brace-expansion` from 5.0.8 to 5.0.9 to resolve the high-severity denial-of-service advisory `GHSA-rgw5-rvv9-x895`.
+- Updated `fast-uri` from 3.1.4 to 3.1.5 to resolve the high-severity host-confusion advisory `GHSA-7p8r-x3mc-p8w7`.
+- Restored a clean dependency audit with zero known vulnerabilities.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.4` / `v2026.08.04`.
+
 ## v2026.07.13.3 - 2026-07-28
 
 - Includes all FocusClaw changes since `v2026.07.13`, including the internal DEV increments `v2026.07.13.1` and `v2026.07.13.2`.
