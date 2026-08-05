@@ -216,7 +216,7 @@ export default function App() {
         <div className="flex flex-wrap justify-center gap-8 md:gap-16 text-center">
           <div>
             <div className="text-2xl font-extrabold text-[#fafafa]">Open source</div>
-            <div className="text-sm text-[#71717a]">MIT license · GitHub free</div>
+            <div className="text-sm text-[#71717a]">AGPL-3.0 license · GitHub free</div>
           </div>
           <div className="w-px bg-[#27272a] hidden md:block" />
           <div>

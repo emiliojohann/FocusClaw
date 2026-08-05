@@ -248,4 +248,6 @@ data/          Local SQLite database directory
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+FocusClaw is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](./LICENSE).
+
+FocusClaw releases published before August 4, 2026 remain available under the MIT terms granted with those releases. Copyright (c) 2026 Long Life Ramen LLC.

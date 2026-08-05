@@ -1239,7 +1239,7 @@ export default function SettingsPage() {
                   @emeeliojohann
                 </a>
               </p>
-              <p>Released under the MIT License.</p>
+              <p>Released under the GNU Affero General Public License v3.0.</p>
               <p>
                 <a
                   href={GITHUB_LATEST_RELEASE_URL}
