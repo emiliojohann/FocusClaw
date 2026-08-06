@@ -1,5 +1,11 @@
 # Changelog
 
+## v2026.08.05.1 - 2026-08-06
+
+- Added a root npm override that pins the transitive `fast-uri` runtime dependency to patched version `3.1.5`, preventing resolution below the fix for the high-severity host-confusion advisory `GHSA-7p8r-x3mc-p8w7` / `CVE-2026-18446`.
+- Refreshed the dependency manifest and lockfile so GitHub can rescan the explicit patched resolution after its public dependency graph continued reporting stale `fast-uri@3.1.4` data.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.5-1` / `v2026.08.05.1`.
+
 ## v2026.08.05 - 2026-08-05
 
 ### Thanks
