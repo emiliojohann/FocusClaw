@@ -39,7 +39,7 @@ const CreateTaskParams = Type.Object({
   title: Type.String({ description: 'Task title' }),
   description: Type.Optional(Type.String({ description: 'Task description (markdown supported)' })),
   projectId: Type.String({ description: 'Project ID to create task in' }),
-  statusId: Type.Optional(Type.String({ description: 'Status ID (for example Backlog, In Progress, Done)' })),
+  statusId: Type.Optional(Type.String({ description: 'Workspace status-definition ID' })),
   priority: Type.Optional(Type.Integer({ description: 'Priority: 1=Critical, 2=High, 3=Medium, 4=Low', default: 2 })),
   dueDate: Type.Optional(Type.String({ description: 'Due date in ISO format, for example 2026-05-01' })),
   assigneeId: Type.Optional(Type.String({ description: 'Owner label or user ID to assign the task to' })),
@@ -48,7 +48,7 @@ const CreateTaskParams = Type.Object({
 
 const ListTasksParams = Type.Object({
   projectId: Type.String({ description: 'Project ID to list tasks from' }),
-  status: Type.Optional(Type.String({ description: 'Filter by status, for example Backlog, In Progress, Done' })),
+  status: Type.Optional(Type.String({ description: 'Filter by workspace status-definition ID' })),
   priority: Type.Optional(Type.Integer({ description: 'Filter by priority: 1=Critical, 2=High, 3=Medium, 4=Low' })),
   assigneeId: Type.Optional(Type.String({ description: 'Filter by assignee user ID or owner label' })),
   includeArchived: Type.Optional(Type.Boolean({ description: 'Include archived/completed tasks', default: false })),
@@ -90,7 +90,11 @@ const UpdateTaskParams = Type.Object({
   taskId: Type.String({ description: 'Task ID to update. Use focusclaw_find_task first when the user described the task by title.' }),
   title: Type.Optional(Type.String({ description: 'New title' })),
   description: Type.Optional(Type.String({ description: 'New description' })),
-  statusId: Type.Optional(Type.String({ description: 'New status ID' })),
+  statusId: Type.Optional(Type.String({ description: 'New workspace status-definition ID' })),
+  lifecycle: Type.Optional(Type.Union([
+    Type.Literal('todo'),
+    Type.Literal('inProgress'),
+  ], { description: 'Set the task lifecycle to To Do or In Progress. Use focusclaw_complete_task for Done so recurring tasks are handled correctly.' })),
   priority: Type.Optional(Type.Integer({ description: 'New priority: 1=Critical, 2=High, 3=Medium, 4=Low' })),
   dueDate: Type.Optional(Type.String({ description: 'New due date in ISO format, or null via JSON to clear it' })),
   assigneeId: Type.Optional(Type.String({ description: 'New owner label or assignee user ID' })),
@@ -497,13 +501,26 @@ export default definePluginEntry({
 
     api.registerTool({
       name: 'focusclaw_update_task',
-      description: 'Update a FocusClaw task after identifying it with focusclaw_find_task when needed. Use this for natural-language edit requests.',
+      description: 'Update a FocusClaw task after identifying it with focusclaw_find_task when needed. For "start" or "set in progress," use lifecycle=inProgress; for "move back to to do," use lifecycle=todo. Use focusclaw_complete_task for Done.',
       parameters: UpdateTaskParams,
       async execute(_id, params, context) {
         const config = getConfig(context)
-        const { taskId, assigneeId, ...updates } = params
-        const payload = { ...updates, ...(assigneeId !== undefined ? { assignee: assigneeId } : {}) }
+        const { taskId, assigneeId, lifecycle, ...updates } = params
         try {
+          let lifecycleStatusId: string | null | undefined
+          if (lifecycle === 'todo') {
+            lifecycleStatusId = null
+          } else if (lifecycle === 'inProgress') {
+            const currentTask = await apiRequest<Task>(config, `/api/tasks/${taskId}`)
+            const project = await apiRequest<Project>(config, `/api/projects/${currentTask.projectId}`)
+            const status = await apiRequest<{ id: string }>(config, `/api/tasks/statuses/${project.workspaceId}/in-progress`, { method: 'POST' })
+            lifecycleStatusId = status.id
+          }
+          const payload = {
+            ...updates,
+            ...(lifecycleStatusId !== undefined ? { archived: false, statusId: lifecycleStatusId } : {}),
+            ...(assigneeId !== undefined ? { assignee: assigneeId } : {}),
+          }
           const task = await apiRequest<Task>(config, `/api/tasks/${taskId}`, {
             method: 'PATCH',
             body: JSON.stringify(payload),

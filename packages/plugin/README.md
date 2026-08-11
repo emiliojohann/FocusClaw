@@ -13,7 +13,7 @@ The official OpenClaw plugin for FocusClaw task management. This plugin register
 | `focusclaw_create_task` | Create a new task |
 | `focusclaw_list_tasks` | Legacy project-ID task list |
 | `focusclaw_get_task` | Get task details |
-| `focusclaw_update_task` | Update a task (status, priority, title, etc.) |
+| `focusclaw_update_task` | Update a task, including To Do / In Progress lifecycle changes |
 | `focusclaw_complete_task` | Mark a task as complete (archive) |
 | `focusclaw_delete_task` | Permanently delete a task after user confirmation |
 
@@ -32,6 +32,8 @@ Compact status output groups tasks by project and shows title plus due-date/stat
 Create, edit, complete, and delete actions should remain natural agent actions, for example:
 
 - `Add a task to Launch Plan: prepare screenshots, due Friday.`
+- `Start the task about preparing screenshots.`
+- `Move the screenshots task back to To Do.`
 - `Mark the onboarding checklist complete.`
 - `Delete the task about drafting the first content batch.`
 

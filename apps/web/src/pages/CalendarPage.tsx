@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { taskApi } from '@/lib/api'
+import { taskApi, statusApi } from '@/lib/api'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
 import { DescriptionEditor } from '@/components/DescriptionEditor'
@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/core'
 import {
   CalendarDays, AlertCircle, RefreshCw,
-  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X, ListTree, Paperclip, Repeat2
+  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X, ListTree, Paperclip, Repeat2, Play
 } from 'lucide-react'
 import { getCalendarViewDefaults, getCalendarViewState, getOverviewPanelVisible, setCalendarViewState, setOverviewPanelVisible, type CalendarViewMode } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
@@ -33,6 +33,13 @@ import {
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
 import { dueDateToLocalDateKey, localDateKey } from '@/lib/dates'
+import {
+  hasHydratedDashboardStatus,
+  readCachedInProgressStatusId,
+  resolveInProgressStatusId,
+  type DashboardStatusCache,
+} from '@/lib/dashboardCache'
+import { readCalendarCacheRecord, writeCalendarCacheRecord, type CalendarCacheRecord } from '@/lib/calendarCache'
 
 interface Task {
   id: string
@@ -45,6 +52,7 @@ interface Task {
   updatedAt: string
   projectId?: string
   archived?: boolean
+  statusId?: string | null
   parentId?: string
   recurring?: string
   labels?: string
@@ -73,14 +81,7 @@ interface AttachmentEntry {
   createdAt: string
 }
 
-interface CalendarCache {
-  tasks: Task[]
-  overviewTasks: Task[]
-  projects: ProjectRecord[]
-  workspaceId: string
-  activeProjectId: string
-  projectFilter: string
-}
+type CalendarCache = CalendarCacheRecord<Task, ProjectRecord>
 
 const CALENDAR_CACHE_KEY = 'focusclaw.calendar.snapshot'
 const NEW_TASK_EVENT = 'focusclaw:new-task'
@@ -88,18 +89,7 @@ const NEW_TASK_EVENT = 'focusclaw:new-task'
 function readCalendarCache(): CalendarCache | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(CALENDAR_CACHE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<CalendarCache>
-    if (!Array.isArray(parsed.tasks) || !Array.isArray(parsed.overviewTasks) || !Array.isArray(parsed.projects)) return null
-    return {
-      tasks: parsed.tasks,
-      overviewTasks: parsed.overviewTasks,
-      projects: parsed.projects,
-      workspaceId: parsed.workspaceId || '',
-      activeProjectId: parsed.activeProjectId || '',
-      projectFilter: parsed.projectFilter || 'all',
-    }
+    return readCalendarCacheRecord<Task, ProjectRecord>(window.localStorage, CALENDAR_CACHE_KEY)
   } catch {
     return null
   }
@@ -107,20 +97,37 @@ function readCalendarCache(): CalendarCache | null {
 
 function writeCalendarCache(snapshot: CalendarCache) {
   try {
-    window.localStorage.setItem(CALENDAR_CACHE_KEY, JSON.stringify(snapshot))
+    writeCalendarCacheRecord(window.localStorage, CALENDAR_CACHE_KEY, snapshot)
   } catch {
     // Local cache is an enhancement only.
   }
 }
 
 const initialCalendarCache = readCalendarCache()
+const initialCalendarStatusHydrated = hasHydratedDashboardStatus(initialCalendarCache)
 
-let lastCalendarTasks: Task[] = initialCalendarCache?.tasks ?? []
-let lastCalendarOverviewTasks: Task[] = initialCalendarCache?.overviewTasks ?? []
-let lastCalendarProjects: ProjectRecord[] = initialCalendarCache?.projects ?? []
-let lastCalendarWorkspace = initialCalendarCache?.workspaceId ?? ''
-let lastCalendarProject = initialCalendarCache?.activeProjectId ?? ''
-let lastCalendarProjectFilter = initialCalendarCache?.projectFilter ?? 'all'
+let lastCalendarTasks: Task[] = initialCalendarStatusHydrated ? initialCalendarCache?.tasks ?? [] : []
+let lastCalendarOverviewTasks: Task[] = initialCalendarStatusHydrated ? initialCalendarCache?.overviewTasks ?? [] : []
+let lastCalendarProjects: ProjectRecord[] = initialCalendarStatusHydrated ? initialCalendarCache?.projects ?? [] : []
+let lastCalendarWorkspace = initialCalendarStatusHydrated ? initialCalendarCache?.workspaceId ?? '' : ''
+let lastCalendarProject = initialCalendarStatusHydrated ? initialCalendarCache?.activeProjectId ?? '' : ''
+let lastCalendarProjectFilter = initialCalendarStatusHydrated ? initialCalendarCache?.projectFilter ?? 'all' : 'all'
+let lastCalendarStatusHydrated = initialCalendarStatusHydrated
+let lastCalendarInProgressStatusId: string | null = readCachedInProgressStatusId(initialCalendarCache)
+
+function calendarCacheSnapshot(tasks: Task[] = lastCalendarTasks, overviewTasks: Task[] = lastCalendarOverviewTasks): CalendarCache {
+  return {
+    tasks,
+    overviewTasks,
+    projects: lastCalendarProjects,
+    workspaceId: lastCalendarWorkspace,
+    activeProjectId: lastCalendarProject,
+    projectFilter: lastCalendarProjectFilter,
+    status: lastCalendarStatusHydrated
+      ? { hydrated: true, inProgressStatusId: lastCalendarInProgressStatusId } satisfies DashboardStatusCache
+      : undefined,
+  }
+}
 
 const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: string; bgColor: string; borderColor: string; shadowColor: string; activeTextColor: string }> = {
   1: { label: 'Critical', badge: 'badge-critical', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)', shadowColor: 'rgba(239,68,68,0.15)', activeTextColor: '#ffffff' },
@@ -172,12 +179,14 @@ function AssigneeBadge({ assignee, compact = false }: { assignee?: string; compa
   const Icon = owner.icon
   return (
     <span
-      className={`badge h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none ${compact ? 'max-w-[4.75rem] gap-1' : 'gap-1'}`}
+      className={`badge fc-calendar-owner-badge h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none ${compact ? 'max-w-[4.75rem] gap-1' : 'gap-1'}`}
+      data-owner={owner.filter}
       style={{ background: `${owner.color}18`, color: owner.color, borderColor: `${owner.color}30` }}
       title={`Owner: ${owner.label}`}
+      aria-label={`Owner: ${owner.label}`}
     >
       <Icon className="w-2.5 h-2.5" />
-      <span className="truncate">{owner.label}</span>
+      <span className="fc-calendar-owner-label truncate">{owner.label}</span>
     </span>
   )
 }
@@ -188,12 +197,12 @@ function SubtaskIndicator({ task, compact = false }: { task: Task; compact?: boo
   const completed = task.subtaskCompleted || 0
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] font-medium text-zinc-400 ${compact ? 'h-4 px-1 text-[9px]' : 'h-5 px-1.5 text-[10px]'}`}
+      className={`fc-calendar-subtask-badge inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] font-medium text-zinc-400 ${compact ? 'h-4 px-1 text-[9px]' : 'h-5 px-1.5 text-[10px]'}`}
       title={`${completed}/${total} subtasks complete`}
       aria-label={`${completed} of ${total} subtasks complete`}
     >
       <ListTree className={compact ? 'h-2.5 w-2.5 text-zinc-500' : 'h-3 w-3 text-zinc-500'} />
-      {completed}/{total}
+      <span className="fc-subtask-badge-label">{completed}/{total}</span>
     </span>
   )
 }
@@ -299,15 +308,43 @@ function CalendarDayCell({
   )
 }
 
-function CalendarAgendaTaskRow({ task, projectName, onOpen }: { task: Task; projectName: string; onOpen: (task: Task) => void }) {
+function CalendarAgendaTaskRow({
+  task,
+  projectName,
+  isInProgress,
+  compactBadges = false,
+  onOpen,
+}: {
+  task: Task
+  projectName: string
+  isInProgress: boolean
+  compactBadges?: boolean
+  onOpen: (task: Task) => void
+}) {
   const priority = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG[4]
   const isCompleted = !!task.archived
+  const priorityBadge = !isCompleted ? (
+    <span
+      className={`badge ${priority.badge} fc-calendar-agenda-priority h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none`}
+      title={`Priority: ${priority.label}`}
+      aria-label={`Priority: ${priority.label}`}
+    >
+      <span className="fc-calendar-priority-label">{priority.label}</span>
+      <span className="fc-calendar-priority-initial" aria-hidden="true">{priority.label.charAt(0)}</span>
+    </span>
+  ) : null
+  const inProgressBadge = isInProgress ? (
+    <span className="badge fc-in-progress-badge shrink-0 text-[10px]" title="In Progress" aria-label="In Progress">
+      <Play className="fc-in-progress-badge-icon" aria-hidden="true" />
+      <span className="fc-in-progress-badge-label">In Progress</span>
+    </span>
+  ) : null
 
   return (
     <button
       type="button"
       onClick={() => onOpen(task)}
-      className="w-full rounded-xl border p-3 text-left transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+      className={`w-full rounded-xl border p-3 text-left transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${compactBadges ? 'fc-calendar-overflow-task-row' : ''}`}
       style={{
         background: isCompleted ? 'rgba(113,113,122,0.10)' : priority.bgColor,
         borderColor: isCompleted ? 'rgba(113,113,122,0.28)' : priority.borderColor,
@@ -319,20 +356,30 @@ function CalendarAgendaTaskRow({ task, projectName, onOpen }: { task: Task; proj
           style={{ background: isCompleted ? 'rgba(113,113,122,0.75)' : priority.color }}
         />
         <span className="min-w-0 flex-1">
-          <span className={`block truncate text-sm font-medium ${isCompleted ? 'text-zinc-500 line-through' : 'text-white'}`}>
+          <span className={`fc-calendar-agenda-title block truncate text-sm font-medium ${isCompleted ? 'text-zinc-500 line-through' : 'text-white'}`}>
             {task.title}
           </span>
           <span className="block truncate text-[11px] text-zinc-500">{projectName}</span>
         </span>
-        {!isCompleted && (
-          <span className={`badge ${priority.badge} h-4 shrink-0 px-1.5 py-0 text-[9px] leading-none`}>
-            {priority.label}
-          </span>
+        {compactBadges ? (
+          <>
+            <RecurringIndicator recurring={task.recurring} />
+            <AttachmentIndicator count={task.attachmentTotal} />
+            {inProgressBadge}
+            <SubtaskIndicator task={task} />
+            {priorityBadge}
+            <AssigneeBadge assignee={task.assignee} compact />
+          </>
+        ) : (
+          <>
+            <RecurringIndicator recurring={task.recurring} />
+            <AttachmentIndicator count={task.attachmentTotal} />
+            {inProgressBadge}
+            <SubtaskIndicator task={task} />
+            {priorityBadge}
+            <AssigneeBadge assignee={task.assignee} compact />
+          </>
         )}
-        <SubtaskIndicator task={task} />
-        <RecurringIndicator recurring={task.recurring} />
-        <AttachmentIndicator count={task.attachmentTotal} />
-        <AssigneeBadge assignee={task.assignee} compact />
       </span>
     </button>
   )
@@ -362,11 +409,12 @@ export default function CalendarPage() {
   const [overviewTasks, setOverviewTasks] = useState<Task[]>(lastCalendarOverviewTasks)
   const [projects, setProjects] = useState<ProjectRecord[]>(lastCalendarProjects)
   const [activeWorkspace, setActiveWorkspace] = useState(lastCalendarWorkspace)
+  const [inProgressStatusId, setInProgressStatusId] = useState<string | null>(lastCalendarInProgressStatusId)
   const [activeProject, setActiveProject] = useState(lastCalendarProject)
   const [projectFilter, setProjectFilter] = useState(calendarViewState.projectFilter || lastCalendarProjectFilter)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [calendarMode, setCalendarMode] = useState<CalendarViewMode>(calendarViewState.mode || 'month')
-  const [loading, setLoading] = useState(!initialCalendarCache)
+  const [loading, setLoading] = useState(!initialCalendarStatusHydrated)
   const [initialized, setInitialized] = useState(lastCalendarProjects.length > 0)
   const [initError, setInitError] = useState('')
   const [showCompleted, setShowCompleted] = useState(calendarViewState.showCompleted ?? calendarDefaults.showCompleted)
@@ -431,6 +479,7 @@ export default function CalendarPage() {
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [panelLoading, setPanelLoading] = useState(false)
+  const [lifecycleChanging, setLifecycleChanging] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editPriority, setEditPriority] = useState(2)
@@ -459,14 +508,7 @@ export default function CalendarPage() {
     setTasks((prev) => {
       const nextTasks = typeof updater === 'function' ? updater(prev) : updater
       lastCalendarTasks = nextTasks
-      writeCalendarCache({
-        tasks: nextTasks,
-        overviewTasks: lastCalendarOverviewTasks,
-        projects: lastCalendarProjects,
-        workspaceId: lastCalendarWorkspace,
-        activeProjectId: lastCalendarProject,
-        projectFilter: lastCalendarProjectFilter,
-      })
+      writeCalendarCache(calendarCacheSnapshot(nextTasks))
       return nextTasks
     })
   }
@@ -510,29 +552,30 @@ export default function CalendarPage() {
       const initialProjectIds = initialProjectFilter === 'all'
         ? context.projects.map((project) => project.id)
         : [initialProjectFilter]
-      const { calendarTasks, overviewTasks } = await fetchCalendarTasks(initialProjectIds, showCompleted)
+      const [{ calendarTasks, overviewTasks }, initialStatuses] = await Promise.all([
+        fetchCalendarTasks(initialProjectIds, showCompleted),
+        statusApi.list(context.workspace.id),
+      ])
       lastCalendarLoadKey.current = calendarLoadKey(initialProjectFilter, showCompleted, initialProjectIds)
+      const initialInProgressStatusId = resolveInProgressStatusId(initialStatuses)
 
-      setProjects(context.projects)
-      setActiveWorkspace(context.workspace.id)
-      setActiveProject(initialProjectId)
-      setProjectFilter(initialProjectFilter)
-      setCalendarViewState({ projectFilter: initialProjectFilter })
-      setCachedTasks(calendarTasks)
-      setOverviewTasks(overviewTasks)
       lastCalendarProjects = context.projects
       lastCalendarWorkspace = context.workspace.id
       lastCalendarProject = initialProjectId
       lastCalendarProjectFilter = initialProjectFilter
       lastCalendarOverviewTasks = overviewTasks
-      writeCalendarCache({
-        tasks: calendarTasks,
-        overviewTasks,
-        projects: context.projects,
-        workspaceId: context.workspace.id,
-        activeProjectId: initialProjectId,
-        projectFilter: initialProjectFilter,
-      })
+      lastCalendarStatusHydrated = true
+      lastCalendarInProgressStatusId = initialInProgressStatusId
+
+      setProjects(context.projects)
+      setActiveWorkspace(context.workspace.id)
+      setActiveProject(initialProjectId)
+      setInProgressStatusId(initialInProgressStatusId)
+      setProjectFilter(initialProjectFilter)
+      setCalendarViewState({ projectFilter: initialProjectFilter })
+      setCachedTasks(calendarTasks)
+      setOverviewTasks(overviewTasks)
+      writeCalendarCache(calendarCacheSnapshot(calendarTasks, overviewTasks))
       setInitialized(true)
     } catch (err) {
       setInitError('Failed to connect to API. Make sure the server is running.')
@@ -631,14 +674,7 @@ export default function CalendarPage() {
       setOverviewTasks(overviewTasks)
       lastCalendarOverviewTasks = overviewTasks
       lastCalendarProjectFilter = projectFilterValue
-      writeCalendarCache({
-        tasks: calendarTasks,
-        overviewTasks,
-        projects: lastCalendarProjects,
-        workspaceId: lastCalendarWorkspace,
-        activeProjectId: lastCalendarProject,
-        projectFilter: lastCalendarProjectFilter,
-      })
+      writeCalendarCache(calendarCacheSnapshot(calendarTasks, overviewTasks))
     } catch (err) { console.error('Failed to load tasks:', err) }
     finally { setLoading(false) }
   }
@@ -651,14 +687,7 @@ export default function CalendarPage() {
     const overviewTasks = (await Promise.all(projectIds.map((projectId) => taskApi.list(projectId, { includeArchived: true })))).flat()
     setOverviewTasks(overviewTasks)
     lastCalendarOverviewTasks = overviewTasks
-    writeCalendarCache({
-      tasks: lastCalendarTasks,
-      overviewTasks,
-      projects: lastCalendarProjects,
-      workspaceId: lastCalendarWorkspace,
-      activeProjectId: lastCalendarProject,
-      projectFilter: lastCalendarProjectFilter,
-    })
+    writeCalendarCache(calendarCacheSnapshot(lastCalendarTasks, overviewTasks))
   }
 
   const year = currentDate.getFullYear()
@@ -841,6 +870,38 @@ export default function CalendarPage() {
       setSelectedTask(null)
       await refreshOverviewStats()
     } catch (err) { console.error('Failed to reopen task:', err) }
+  }
+
+  const handleLifecycleChange = async (lifecycle: 'todo' | 'inProgress' | 'done') => {
+    if (!selectedTask || lifecycleChanging) return
+    setLifecycleChanging(true)
+    try {
+      if (lifecycle === 'done') {
+        await taskApi.finish(selectedTask.id)
+        setSelectedTask(null)
+        await Promise.all([loadTasks(), refreshOverviewStats()])
+        return
+      }
+
+      let statusId: string | null = null
+      if (lifecycle === 'inProgress') {
+        const status = await statusApi.ensureInProgress(activeWorkspace)
+        statusId = status.id
+        lastCalendarStatusHydrated = true
+        lastCalendarInProgressStatusId = status.id
+        setInProgressStatusId(status.id)
+      }
+      const updated = await taskApi.update(selectedTask.id, { archived: false, statusId })
+      setCachedTasks((prev) => shouldKeepTaskInCalendar(updated, projectFilter, showCompleted)
+        ? prev.map((task) => task.id === updated.id ? updated : task)
+        : prev.filter((task) => task.id !== updated.id))
+      setOverviewTasks((prev) => prev.map((task) => task.id === updated.id ? updated : task))
+      setSelectedTask(updated)
+    } catch (err) {
+      console.error('Failed to change task status:', err)
+    } finally {
+      setLifecycleChanging(false)
+    }
   }
 
   const handleAddSubtask = async () => {
@@ -1182,7 +1243,7 @@ export default function CalendarPage() {
                       {tasks.length > 0 ? (
                         <div className="space-y-2">
                           {tasks.map((task) => (
-                          <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} onOpen={openTaskPanel} />
+                          <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} isInProgress={!!inProgressStatusId && task.statusId === inProgressStatusId} onOpen={openTaskPanel} />
                           ))}
                         </div>
                       ) : (
@@ -1328,7 +1389,7 @@ export default function CalendarPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {agendaTasks.map((task) => (
-                <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} onOpen={openTaskPanel} />
+                <CalendarAgendaTaskRow key={task.id} task={task} projectName={getProjectName(task)} isInProgress={!!inProgressStatusId && task.statusId === inProgressStatusId} compactBadges onOpen={openTaskPanel} />
               ))}
             </div>
           </div>
@@ -1349,6 +1410,8 @@ export default function CalendarPage() {
           editRecurring={editRecurring}
           editTags={editTags}
           saving={saving}
+          lifecycleChanging={lifecycleChanging}
+          isInProgress={!!inProgressStatusId && selectedTask.statusId === inProgressStatusId}
           comments={comments}
           subtasks={subtasks}
           attachments={attachments}
@@ -1376,6 +1439,7 @@ export default function CalendarPage() {
           setNewSubtaskPriority={setNewSubtaskPriority}
           onClose={closeTaskPanel}
           onSave={handleSaveTask}
+          onLifecycleChange={handleLifecycleChange}
           onReopen={handleReopenTask}
           onDelete={handleDeleteTask}
           onAddSubtask={handleAddSubtask}

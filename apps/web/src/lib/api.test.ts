@@ -2,6 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { apiKey, projectApi } from './api'
+import {
+  hasHydratedDashboardStatus,
+  readCachedInProgressStatusId,
+  readDashboardCacheRecord,
+  resolveInProgressStatusId,
+  writeDashboardCacheRecord,
+} from './dashboardCache'
 import { resolveTaskProjectId } from './taskForm'
 
 const storage = new Map<string, string>()
@@ -39,4 +46,51 @@ test('request helper sends saved x-api-key header', async () => {
 test('new task project requires an explicit project selection', () => {
   assert.equal(resolveTaskProjectId(''), '')
   assert.equal(resolveTaskProjectId('selected-project'), 'selected-project')
+})
+
+test('dashboard cache distinguishes missing status hydration from no in-progress status', () => {
+  assert.equal(hasHydratedDashboardStatus({}), false)
+  assert.equal(readCachedInProgressStatusId({}), null)
+  assert.equal(hasHydratedDashboardStatus({ status: { hydrated: true, inProgressStatusId: null } }), true)
+  assert.equal(readCachedInProgressStatusId({ status: { hydrated: true, inProgressStatusId: null } }), null)
+})
+
+test('dashboard status resolver matches in progress case-insensitively', () => {
+  assert.equal(resolveInProgressStatusId([
+    { id: 'todo', name: 'Todo' },
+    { id: 'progress', name: '  In Progress  ' },
+  ]), 'progress')
+  assert.equal(resolveInProgressStatusId([{ id: 'done', name: 'Done' }]), null)
+})
+
+test('dashboard cache read/write preserves validated status hydration', () => {
+  const cacheStorage = new Map<string, string>()
+  const fakeStorage = {
+    getItem: (key: string) => cacheStorage.get(key) ?? null,
+    setItem: (key: string, value: string) => { cacheStorage.set(key, value) },
+  }
+  const key = 'dashboard-cache-test'
+
+  writeDashboardCacheRecord(fakeStorage, key, {
+    tasks: [{ id: 'task-1' }],
+    projects: [{ id: 'project-1' }],
+    workspaceId: 'workspace-1',
+    activeProjectId: 'project-1',
+    projectFilter: 'all',
+    tags: [],
+    status: { hydrated: true, inProgressStatusId: 'status-progress' },
+  })
+
+  const hydrated = readDashboardCacheRecord(fakeStorage, key)
+  assert.equal(hasHydratedDashboardStatus(hydrated), true)
+  assert.equal(readCachedInProgressStatusId(hydrated), 'status-progress')
+
+  cacheStorage.set(key, JSON.stringify({
+    tasks: [],
+    projects: [],
+    status: { hydrated: true },
+  }))
+
+  const invalid = readDashboardCacheRecord(fakeStorage, key)
+  assert.equal(hasHydratedDashboardStatus(invalid), false)
 })

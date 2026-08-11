@@ -1,5 +1,17 @@
 # Changelog
 
+## v2026.08.11 - 2026-08-11
+
+- Added a To Do / In Progress / Done lifecycle control to Task Details while keeping Done routed through the recurring-safe completion endpoint.
+- Added responsive In Progress, priority, subtask, and owner indicators across Tasks and Calendar, including compact icon treatments for mobile and Calendar overflow agendas.
+- Improved light-theme contrast for In Progress, User, and green tag pills while preserving dark-theme colors.
+- Matched task metadata pill sizing and roundness, removed requested borders and priority shadows, and kept long mobile Calendar titles truncated without layout overflow.
+- Restored Calendar tasks and In Progress status metadata atomically so status icons render in their final position without a delayed jump after reloads or route changes.
+- Added API and OpenClaw plugin support for starting tasks and returning them to To Do using each workspace's existing status definitions.
+- Added focused web regression coverage for dashboard and Calendar status-cache hydration.
+- Pinned the transitive `nanoid` dependency to patched version `3.3.18`, resolving the high-severity infinite-loop denial-of-service advisory `GHSA-2v37-7h3g-55p8`.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.11` / `v2026.08.11`.
+
 ## v2026.08.05.1 - 2026-08-06
 
 - Added a root npm override that pins the transitive `fast-uri` runtime dependency to patched version `3.1.5`, preventing resolution below the fix for the high-severity host-confusion advisory `GHSA-7p8r-x3mc-p8w7` / `CVE-2026-18446`.

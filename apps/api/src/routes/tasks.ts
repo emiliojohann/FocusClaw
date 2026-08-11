@@ -935,7 +935,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     const updates = request.body as Partial<{
       title: string
       description: string
-      statusId: string
+      statusId: string | null
       priority: number
       dueDate: string | null
       assignee: string | null
@@ -1128,6 +1128,28 @@ export async function taskRoutes(fastify: FastifyInstance) {
       .orderBy(asc(statusDefinitions.order))
 
     return reply.send(result)
+  })
+
+  // Resolve the workspace's canonical In Progress status, creating it on first use.
+  // This reuses existing status definitions instead of introducing a parallel task field.
+  fastify.post('/statuses/:workspaceId/in-progress', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { workspaceId } = request.params as { workspaceId: string }
+    const workspace = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1)
+    if (workspace.length === 0) return reply.status(404).send({ error: 'Workspace not found' })
+
+    const existing = await db.select().from(statusDefinitions)
+      .where(eq(statusDefinitions.workspaceId, workspaceId))
+      .orderBy(asc(statusDefinitions.order))
+    const inProgress = existing.find((status) => status.name.trim().toLowerCase() === 'in progress')
+    if (inProgress) return reply.send(inProgress)
+
+    const [created] = await db.insert(statusDefinitions).values({
+      workspaceId,
+      name: 'In Progress',
+      order: existing.length,
+      color: '#3B82F6',
+    }).returning()
+    return reply.status(201).send(created)
   })
 
   // ── Subtasks ──────────────────────────────────────────────────────────────

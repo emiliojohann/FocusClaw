@@ -11,7 +11,7 @@ FocusClaw is the local-first task context layer for OpenClaw, Hermes, and humans
 - Web dashboard for active and completed tasks.
 - Calendar view for tasks with due dates, including completed tasks shown in a muted state.
 - Fastify REST API backed by SQLite through Drizzle ORM.
-- OpenClaw plugin tools for task create, list, get, update, and complete.
+- OpenClaw plugin tools for task create, list, get, lifecycle/update, and recurring-safe completion.
 - Hermes-compatible REST API access for the same task records.
 - Workspace-wide tag definitions.
 
@@ -22,6 +22,8 @@ FocusClaw is the local-first task context layer for OpenClaw, Hermes, and humans
 - `POST /api/tasks`
 - `GET /api/tasks/:id`
 - `PATCH /api/tasks/:id`
+- `GET /api/tasks/statuses/:workspaceId`
+- `POST /api/tasks/statuses/:workspaceId/in-progress`
 - `DELETE /api/tasks/:id`
 - `POST /api/tasks/:id/complete`
 - `GET /api/tasks/:id/subtasks`

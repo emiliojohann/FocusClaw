@@ -30,6 +30,9 @@
   --warning-bg: rgba(245, 158, 11, 0.12);
   --danger: #ef4444;
   --danger-bg: rgba(239, 68, 68, 0.12);
+  --in-progress: #60a5fa;
+  --in-progress-bg: rgba(59, 130, 246, 0.15);
+  --in-progress-border: rgba(59, 130, 246, 0.4);
   /* Priority colors refined */
   --priority-critical: #ef4444;
   --priority-high: #f97316;
@@ -40,6 +43,9 @@
   --tag-yellow: #eab308;
   --tag-yellow-bg: rgba(234, 179, 8, 0.15);
   --tag-yellow-border: rgba(234, 179, 8, 0.3);
+  --tag-green: #22c55e;
+  --tag-green-bg: rgba(34, 197, 94, 0.15);
+  --tag-green-border: rgba(34, 197, 94, 0.3);
   --priority-low: #71717a;
   --header-height: 84px;
   color-scheme: dark;
@@ -64,9 +70,15 @@
   --shadow-color: rgba(15,23,42,0.08);
   --warning: #b45309;
   --warning-bg: rgba(180, 83, 9, 0.16);
+  --in-progress: #1d4ed8;
+  --in-progress-bg: rgba(37, 99, 235, 0.18);
+  --in-progress-border: rgba(29, 78, 216, 0.48);
   --accent-glow: rgba(245, 61, 45, 0.12);
   --accent-subtle: rgba(245, 61, 45, 0.08);
   --priority-medium: #b45309;
+  --tag-green: #166534;
+  --tag-green-bg: #dcfce7;
+  --tag-green-border: #86efac;
   --priority-medium-bg: rgba(180, 83, 9, 0.16);
   --priority-medium-border: rgba(180, 83, 9, 0.38);
   --priority-medium-active-text: #ffffff;
@@ -309,6 +321,94 @@ body {
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   white-space: nowrap;
+}
+
+.fc-in-progress-badge {
+  color: var(--in-progress);
+  background: var(--in-progress-bg);
+  border: none;
+  box-shadow: none;
+}
+
+.fc-in-progress-badge-icon {
+  display: none;
+}
+
+.fc-calendar-subtask-badge,
+.fc-subtask-badge {
+  border: none;
+  border-radius: 9999px;
+}
+
+:root[data-theme='light'] .fc-calendar-owner-badge[data-owner='user'],
+:root[data-theme='light'] .fc-owner-badge[data-owner='user'] {
+  background: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+.fc-calendar-priority-initial {
+  display: none;
+}
+
+.fc-calendar-overflow-task-row .fc-calendar-agenda-priority,
+.fc-calendar-overflow-task-row .fc-in-progress-badge,
+.fc-calendar-overflow-task-row .fc-calendar-subtask-badge,
+.fc-calendar-overflow-task-row .fc-calendar-owner-badge {
+  width: 1.38125rem;
+  height: 1.38125rem;
+  min-width: 1.38125rem;
+  min-height: 1.38125rem;
+  max-width: 1.38125rem;
+  max-height: 1.38125rem;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  line-height: 1;
+}
+
+.fc-calendar-overflow-task-row .fc-calendar-agenda-priority {
+  font-size: 0.625rem;
+}
+
+.fc-calendar-overflow-task-row .fc-in-progress-badge-icon {
+  display: block;
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+
+.fc-calendar-overflow-task-row .fc-calendar-subtask-badge svg,
+.fc-calendar-overflow-task-row .fc-calendar-owner-badge svg {
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+
+.fc-calendar-overflow-task-row .fc-calendar-priority-label,
+.fc-calendar-overflow-task-row .fc-in-progress-badge-label,
+.fc-calendar-overflow-task-row .fc-subtask-badge-label,
+.fc-calendar-overflow-task-row .fc-calendar-owner-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fc-calendar-overflow-task-row .fc-calendar-priority-initial {
+  display: inline;
+}
+
+.fc-calendar-overflow-task-row .fc-calendar-agenda-title {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .badge-critical {
@@ -794,6 +894,145 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 
   .fc-recurring-icon-desktop {
     display: inline-flex;
+  }
+
+  .fc-subtask-badge {
+    height: 1.625rem;
+    min-height: 1.625rem;
+    max-height: 1.625rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .fc-calendar-agenda-priority {
+    width: 1.38125rem;
+    height: 1.38125rem;
+    min-width: 1.38125rem;
+    min-height: 1.38125rem;
+    max-width: 1.38125rem;
+    max-height: 1.38125rem;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    border: none;
+    border-radius: 9999px;
+    font-size: 0.625rem;
+    line-height: 1;
+  }
+
+  .fc-calendar-priority-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .fc-calendar-priority-initial {
+    display: inline;
+  }
+
+  .fc-calendar-owner-badge,
+  .fc-owner-badge {
+    width: 1.38125rem;
+    height: 1.38125rem;
+    min-width: 1.38125rem;
+    min-height: 1.38125rem;
+    max-width: 1.38125rem;
+    max-height: 1.38125rem;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+    border-radius: 9999px;
+  }
+
+  .fc-calendar-owner-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .fc-in-progress-badge {
+    width: 1.38125rem;
+    height: 1.38125rem;
+    min-width: 1.38125rem;
+    min-height: 1.38125rem;
+    max-width: 1.38125rem;
+    max-height: 1.38125rem;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    border-radius: 9999px;
+    line-height: 1;
+  }
+
+  .fc-in-progress-badge-icon {
+    display: block;
+    width: 0.6875rem;
+    height: 0.6875rem;
+  }
+
+  .fc-in-progress-badge-label,
+  .fc-subtask-badge-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .fc-calendar-owner-badge svg,
+  .fc-owner-badge svg {
+    width: 0.6875rem;
+    height: 0.6875rem;
+  }
+
+  .fc-calendar-subtask-badge,
+  .fc-subtask-badge {
+    width: 1.38125rem;
+    height: 1.38125rem;
+    min-width: 1.38125rem;
+    min-height: 1.38125rem;
+    max-width: 1.38125rem;
+    max-height: 1.38125rem;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    border: none;
+    border-radius: 9999px;
+    line-height: 1;
+  }
+
+  .fc-calendar-subtask-badge svg,
+  .fc-subtask-badge svg {
+    width: 0.6875rem;
+    height: 0.6875rem;
+  }
+
+  .fc-owner-badge-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

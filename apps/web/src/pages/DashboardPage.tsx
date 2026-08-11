@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { taskApi, tagApi } from '@/lib/api'
+import { taskApi, tagApi, statusApi } from '@/lib/api'
 import {
   Check, Plus, X,
   ChevronRight, AlertCircle, RefreshCw, Clock, Repeat2,
-  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip, ListChecks, Trash2
+  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip, ListChecks, Play, Trash2
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
@@ -12,6 +12,14 @@ import { DescriptionEditor } from '@/components/DescriptionEditor'
 import { TaskPanel } from '@/components/TaskPanel'
 import { getOverviewPanelVisible, getTaskViewDefaults, getTaskViewMode, getTaskViewState, setOverviewPanelVisible, setTaskViewMode, setTaskViewState, type TaskFilter, type TaskSort, type TaskViewMode } from '@/lib/viewSettings'
 import { ensureProjectContext, setStoredProjectId, type ProjectRecord } from '@/lib/projectContext'
+import {
+  hasHydratedDashboardStatus,
+  readDashboardCacheRecord,
+  readCachedInProgressStatusId,
+  resolveInProgressStatusId,
+  type DashboardStatusCache,
+  writeDashboardCacheRecord,
+} from '@/lib/dashboardCache'
 import {
   ASSIGNEE_OPTIONS,
   getAssigneeOption,
@@ -37,6 +45,7 @@ interface Task {
   updatedAt: string
   projectId?: string
   archived?: boolean
+  statusId?: string | null
   parentId?: string
   recurring?: string
   dependsOn?: string[]
@@ -94,6 +103,7 @@ interface DashboardCache {
   activeProjectId: string
   projectFilter: string
   tags: TagRecord[]
+  status?: DashboardStatusCache
 }
 
 const DASHBOARD_CACHE_KEY = 'focusclaw.dashboard.snapshot'
@@ -104,16 +114,7 @@ function readDashboardCache(): DashboardCache | null {
   try {
     const raw = window.localStorage.getItem(DASHBOARD_CACHE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<DashboardCache>
-    if (!Array.isArray(parsed.tasks) || !Array.isArray(parsed.projects)) return null
-    return {
-      tasks: parsed.tasks,
-      projects: parsed.projects,
-      workspaceId: parsed.workspaceId || '',
-      activeProjectId: parsed.activeProjectId || '',
-      projectFilter: parsed.projectFilter || 'all',
-      tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-    }
+    return readDashboardCacheRecord<Task, ProjectRecord, TagRecord>(window.localStorage, DASHBOARD_CACHE_KEY)
   } catch {
     return null
   }
@@ -121,21 +122,38 @@ function readDashboardCache(): DashboardCache | null {
 
 function writeDashboardCache(snapshot: DashboardCache) {
   try {
-    window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(snapshot))
+    writeDashboardCacheRecord(window.localStorage, DASHBOARD_CACHE_KEY, snapshot)
   } catch {
     // Local cache is an enhancement only.
   }
 }
 
 const initialDashboardCache = readDashboardCache()
+const initialDashboardStatusHydrated = hasHydratedDashboardStatus(initialDashboardCache)
 const TASK_VISIBLE_INCREMENT = 50
 
-let lastDashboardTasks: Task[] = initialDashboardCache?.tasks ?? []
-let lastDashboardProjects: ProjectRecord[] = initialDashboardCache?.projects ?? []
-let lastDashboardWorkspace = initialDashboardCache?.workspaceId ?? ''
-let lastDashboardProject = initialDashboardCache?.activeProjectId ?? ''
-let lastDashboardProjectFilter = initialDashboardCache?.projectFilter ?? 'all'
-let lastDashboardTags: TagRecord[] = initialDashboardCache?.tags ?? []
+let lastDashboardTasks: Task[] = initialDashboardStatusHydrated ? initialDashboardCache?.tasks ?? [] : []
+let lastDashboardProjects: ProjectRecord[] = initialDashboardStatusHydrated ? initialDashboardCache?.projects ?? [] : []
+let lastDashboardWorkspace = initialDashboardStatusHydrated ? initialDashboardCache?.workspaceId ?? '' : ''
+let lastDashboardProject = initialDashboardStatusHydrated ? initialDashboardCache?.activeProjectId ?? '' : ''
+let lastDashboardProjectFilter = initialDashboardStatusHydrated ? initialDashboardCache?.projectFilter ?? 'all' : 'all'
+let lastDashboardTags: TagRecord[] = initialDashboardStatusHydrated ? initialDashboardCache?.tags ?? [] : []
+let lastDashboardStatusHydrated = initialDashboardStatusHydrated
+let lastDashboardInProgressStatusId: string | null = readCachedInProgressStatusId(initialDashboardCache)
+
+function dashboardCacheSnapshot(tasks: Task[] = lastDashboardTasks, tags: TagRecord[] = lastDashboardTags): DashboardCache {
+  return {
+    tasks,
+    projects: lastDashboardProjects,
+    workspaceId: lastDashboardWorkspace,
+    activeProjectId: lastDashboardProject,
+    projectFilter: lastDashboardProjectFilter,
+    tags,
+    status: lastDashboardStatusHydrated
+      ? { hydrated: true, inProgressStatusId: lastDashboardInProgressStatusId }
+      : undefined,
+  }
+}
 
 function parseDueDateAsLocalDate(dateStr: string | undefined): Date | null {
   if (!dateStr) return null
@@ -297,10 +315,17 @@ function shouldShowTaskInCurrentView(
 function AssigneeBadge({ assignee }: { assignee?: string }) {
   const owner = getAssigneeOption(assignee)
   const Icon = owner.icon
+  const label = `Owner: ${owner.label}`
   return (
-    <span className="badge shrink-0 text-[10px]" style={{ background: `${owner.color}18`, color: owner.color, borderColor: `${owner.color}30` }}>
-      <Icon className="w-3 h-3" />
-      {owner.label}
+    <span
+      className="badge fc-owner-badge shrink-0 text-[10px]"
+      data-owner={owner.filter}
+      style={{ background: `${owner.color}18`, color: owner.color, borderColor: `${owner.color}30` }}
+      title={label}
+      aria-label={label}
+    >
+      <Icon className="w-3 h-3" aria-hidden="true" />
+      <span className="fc-owner-badge-label">{owner.label}</span>
     </span>
   )
 }
@@ -311,12 +336,12 @@ function SubtaskIndicator({ task }: { task: Task }) {
   const completed = task.subtaskCompleted || 0
   return (
     <span
-      className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-1.5 text-[10px] font-medium text-zinc-400"
+      className="fc-subtask-badge inline-flex h-5 shrink-0 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-1.5 text-[10px] font-medium text-zinc-400"
       title={`${completed}/${total} subtasks complete`}
       aria-label={`${completed} of ${total} subtasks complete`}
     >
       <ListTree className="h-3 w-3 text-zinc-500" />
-      {completed}/{total}
+      <span className="fc-subtask-badge-label">{completed}/{total}</span>
     </span>
   )
 }
@@ -329,6 +354,8 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>(lastDashboardTasks)
   const [projects, setProjects] = useState<ProjectRecord[]>(lastDashboardProjects)
   const [activeWorkspace, setActiveWorkspace] = useState(lastDashboardWorkspace)
+  const [inProgressStatusId, setInProgressStatusId] = useState<string | null>(lastDashboardInProgressStatusId)
+  const [statusHydrated, setStatusHydrated] = useState(lastDashboardStatusHydrated)
   const [activeProject, setActiveProject] = useState(lastDashboardProject)
   const [projectFilter, setProjectFilter] = useState(taskViewState.projectFilter || lastDashboardProjectFilter)
   const [loading, setLoading] = useState(!initialDashboardCache || lastDashboardTasks.length === 0)
@@ -376,6 +403,7 @@ export default function DashboardPage() {
   const [bulkDeleteError, setBulkDeleteError] = useState('')
   const [bulkDeleteMessage, setBulkDeleteMessage] = useState('')
   const [panelLoading, setPanelLoading] = useState(false)
+  const [lifecycleChanging, setLifecycleChanging] = useState(false)
   const [comments, setComments] = useState<CommentEntry[]>([])
   const [attachments, setAttachments] = useState<AttachmentEntry[]>([])
   const [newComment, setNewComment] = useState('')
@@ -431,14 +459,7 @@ export default function DashboardPage() {
     setTasks((prev) => {
       const nextTasks = typeof updater === 'function' ? updater(prev) : updater
       lastDashboardTasks = nextTasks
-      writeDashboardCache({
-        tasks: nextTasks,
-        projects: lastDashboardProjects,
-        workspaceId: lastDashboardWorkspace,
-        activeProjectId: lastDashboardProject,
-        projectFilter: lastDashboardProjectFilter,
-        tags: lastDashboardTags,
-      })
+      writeDashboardCache(dashboardCacheSnapshot(nextTasks))
       return nextTasks
     })
   }
@@ -562,12 +583,22 @@ export default function DashboardPage() {
         ? context.projects.map((project) => project.id)
         : [initialProjectFilter]
       const initialSearchQuery = (taskViewState.searchQuery || '').trim()
-      const [initialTasks, initialTags] = await Promise.all([
+      const [initialTasks, initialTags, initialStatuses] = await Promise.all([
         fetchTasksForProjectIds(initialProjectIds, sort, filter, initialSearchQuery),
         tagApi.list(),
+        statusApi.list(context.workspace.id),
       ])
       lastDashboardLoadKey.current = dashboardLoadKey(initialProjectFilter, sort, filter, initialProjectIds, initialSearchQuery)
       initialTags.sort((a: TagRecord, b: TagRecord) => a.name.localeCompare(b.name))
+      const initialInProgressStatusId = resolveInProgressStatusId(initialStatuses)
+
+      lastDashboardProjects = context.projects
+      lastDashboardWorkspace = context.workspace.id
+      lastDashboardProject = context.activeProjectId
+      lastDashboardProjectFilter = initialProjectFilter
+      lastDashboardTags = initialTags
+      lastDashboardStatusHydrated = true
+      lastDashboardInProgressStatusId = initialInProgressStatusId
 
       setProjects(context.projects)
       setActiveWorkspace(context.workspace.id)
@@ -575,20 +606,9 @@ export default function DashboardPage() {
       setProjectFilter(initialProjectFilter)
       setTaskViewState({ projectFilter: initialProjectFilter })
       setAllTags(initialTags)
+      setStatusHydrated(true)
+      setInProgressStatusId(initialInProgressStatusId)
       setCachedTasks(initialTasks)
-      lastDashboardProjects = context.projects
-      lastDashboardWorkspace = context.workspace.id
-      lastDashboardProject = context.activeProjectId
-      lastDashboardProjectFilter = initialProjectFilter
-      lastDashboardTags = initialTags
-      writeDashboardCache({
-        tasks: initialTasks,
-        projects: context.projects,
-        workspaceId: context.workspace.id,
-        activeProjectId: context.activeProjectId,
-        projectFilter: initialProjectFilter,
-        tags: initialTags,
-      })
       setInitialized(true)
     } catch (err) {
       setInitError('Failed to connect to API. Make sure the server is running.')
@@ -664,14 +684,7 @@ export default function DashboardPage() {
       tags.sort((a: TagRecord, b: TagRecord) => a.name.localeCompare(b.name))
       setAllTags(tags)
       lastDashboardTags = tags
-      writeDashboardCache({
-        tasks: lastDashboardTasks,
-        projects: lastDashboardProjects,
-        workspaceId: lastDashboardWorkspace,
-        activeProjectId: lastDashboardProject,
-        projectFilter: lastDashboardProjectFilter,
-        tags,
-      })
+      writeDashboardCache(dashboardCacheSnapshot(lastDashboardTasks, tags))
     } catch (err) {
       console.error('Failed to load tags:', err)
     }
@@ -745,6 +758,46 @@ export default function DashboardPage() {
       await taskApi.finish(taskId)
       await loadTasks()
     } catch (err) { console.error(err) }
+  }
+
+  const handleLifecycleChange = async (lifecycle: 'todo' | 'inProgress' | 'done') => {
+    if (!selectedTask || lifecycleChanging) return
+    setLifecycleChanging(true)
+    try {
+      if (lifecycle === 'done') {
+        await taskApi.finish(selectedTask.id)
+        setSelectedTask(null)
+        await loadTasks()
+        return
+      }
+
+      let statusId: string | null = null
+      if (lifecycle === 'inProgress') {
+        const status = await statusApi.ensureInProgress(activeWorkspace)
+        statusId = status.id
+        lastDashboardStatusHydrated = true
+        lastDashboardInProgressStatusId = status.id
+        setStatusHydrated(true)
+        setInProgressStatusId(status.id)
+      }
+      const updated = await taskApi.update(selectedTask.id, { archived: false, statusId })
+      const keepUpdatedTask = shouldShowTaskInCurrentView(updated, {
+        projectFilter,
+        filter,
+        assigneeFilter,
+        tagFilter,
+        searchValue: debouncedSearchQuery,
+        allTags,
+      })
+      setCachedTasks((prev) => keepUpdatedTask
+        ? prev.map((task) => task.id === updated.id ? updated : task)
+        : prev.filter((task) => task.id !== updated.id))
+      setSelectedTask(updated)
+    } catch (err) {
+      console.error('Failed to change task status:', err)
+    } finally {
+      setLifecycleChanging(false)
+    }
   }
 
   const handleReopenTask = async () => {
@@ -1387,6 +1440,12 @@ export default function DashboardPage() {
                         />
                       )}
                       <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
+                        {statusHydrated && !isCompleted && inProgressStatusId && task.statusId === inProgressStatusId ? (
+                          <span className="badge fc-in-progress-badge shrink-0 text-[10px]" title="In Progress" aria-label="In Progress">
+                            <Play className="fc-in-progress-badge-icon" aria-hidden="true" />
+                            <span className="fc-in-progress-badge-label">In Progress</span>
+                          </span>
+                        ) : null}
                         <SubtaskIndicator task={task} />
                         <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-mobile" />
                         <AttachmentIndicator count={task.attachmentTotal} className="fc-recurring-icon-mobile" />
@@ -1401,7 +1460,7 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`badge ${priority.badge} fc-task-priority-pill text-xs shadow-sm`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
+                      <span className={`badge ${priority.badge} fc-task-priority-pill text-xs`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
                         <PriorityIcon className="w-3 h-3" />
                         {priority.label}
                       </span>
@@ -1470,6 +1529,12 @@ export default function DashboardPage() {
                             <span className={`block text-sm font-medium break-words ${isCompleted ? 'text-zinc-500 line-through' : 'text-[var(--text-primary)]'}`}>{task.title}</span>
                           </div>
                           <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
+                            {statusHydrated && !isCompleted && inProgressStatusId && task.statusId === inProgressStatusId ? (
+                              <span className="badge fc-in-progress-badge shrink-0 text-[10px]" title="In Progress" aria-label="In Progress">
+                                <Play className="fc-in-progress-badge-icon" aria-hidden="true" />
+                                <span className="fc-in-progress-badge-label">In Progress</span>
+                              </span>
+                            ) : null}
                             <SubtaskIndicator task={task} />
                             <RecurringIndicator recurring={task.recurring} className="fc-recurring-icon-mobile" />
                             <AttachmentIndicator count={task.attachmentTotal} className="fc-recurring-icon-mobile" />
@@ -1478,7 +1543,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div className="fc-task-meta-row mt-2">
-                          <span className={`badge ${priority.badge} fc-task-priority-pill text-xs shadow-sm`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
+                          <span className={`badge ${priority.badge} fc-task-priority-pill text-xs`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
                             <PriorityIcon className="w-3 h-3" />
                             {priority.label}
                           </span>
@@ -1524,6 +1589,8 @@ export default function DashboardPage() {
           editRecurring={editRecurring}
           editTags={editTags}
           saving={saving}
+          lifecycleChanging={lifecycleChanging}
+          isInProgress={statusHydrated && !!inProgressStatusId && selectedTask.statusId === inProgressStatusId}
           comments={comments}
           subtasks={subtasks}
           attachments={attachments}
@@ -1551,6 +1618,7 @@ export default function DashboardPage() {
           setNewSubtaskPriority={setNewSubtaskPriority}
           onClose={closeTaskPanel}
           onSave={handleSaveTask}
+          onLifecycleChange={handleLifecycleChange}
           onReopen={handleReopenTask}
           onDelete={requestDeleteTask}
           showDelete={true}

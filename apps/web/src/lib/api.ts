@@ -119,7 +119,7 @@ export const taskApi = {
   update: (taskId: string, data: Partial<{
     title: string
     description: string
-    statusId: string
+    statusId: string | null
     priority: number
     dueDate: string | null
     assignee: string | null
@@ -174,6 +174,22 @@ export const taskApi = {
   // Subtasks
   deleteSubtask: (subtaskId: string) =>
     request<void>(`/tasks/subtasks/${subtaskId}`, { method: 'DELETE', headers: {} }),
+}
+
+export interface StatusDefinition {
+  id: string
+  workspaceId: string
+  name: string
+  order: number
+  color?: string | null
+}
+
+export const statusApi = {
+  list: (workspaceId: string) => request<StatusDefinition[]>(`/tasks/statuses/${workspaceId}`),
+  ensureInProgress: (workspaceId: string) => request<StatusDefinition>(`/tasks/statuses/${workspaceId}/in-progress`, {
+    method: 'POST',
+    headers: {},
+  }),
 }
 
 // Workspaces

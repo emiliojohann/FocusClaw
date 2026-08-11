@@ -70,6 +70,8 @@ GET    /api/tasks/project/:projectId
 POST   /api/tasks
 GET    /api/tasks/:id
 PATCH  /api/tasks/:id
+GET    /api/tasks/statuses/:workspaceId
+POST   /api/tasks/statuses/:workspaceId/in-progress
 POST   /api/tasks/:id/complete
 GET    /api/tasks/:id/comments
 POST   /api/tasks/:id/comments
@@ -131,6 +133,12 @@ curl -X PATCH "$FOCUSCLAW_API/tasks/TASK_ID" \
   -H "Content-Type: application/json" \
   -d '{"priority":1,"assignee":"user"}'
 ```
+
+Task lifecycle uses the existing status definition and completion behavior:
+
+- To Do: patch `statusId` to `null` and `archived` to `false`.
+- In Progress: call `POST /api/tasks/statuses/:workspaceId/in-progress`, then patch the returned `id` into `statusId` with `archived: false`. The resolver reuses an existing case-insensitive `In Progress` definition or creates one on first use.
+- Done: call `POST /api/tasks/:id/complete`. Do not simulate completion by patching a status because this endpoint also creates the next recurring task when required.
 
 Complete a task:
 

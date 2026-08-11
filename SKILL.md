@@ -59,6 +59,8 @@ For changes, interpret natural language and use the plugin/API:
 - Find a task by title/project
 - Update title, due date, owner label, priority, status, tags, comments, or subtasks
 - Mark a task complete
+- Start a task / set it to In Progress
+- Move an In Progress task back to To Do
 - Delete a task only after explicit confirmation
 
 When the user names a task by title, find it first instead of asking for a task ID. Ask only if multiple matches are ambiguous.

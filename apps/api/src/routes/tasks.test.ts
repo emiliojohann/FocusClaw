@@ -57,6 +57,64 @@ test('API_KEY is required when API host is not loopback', async () => {
   }
 })
 
+test('In Progress status resolver reuses workspace definitions and creates one safely on demand', async () => {
+  const server = await createServer()
+  try {
+    const firstWorkspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Lifecycle Workspace', slug: `lifecycle-${Date.now()}` },
+    })
+    assert.equal(firstWorkspaceResponse.statusCode, 201)
+    const firstWorkspace = firstWorkspaceResponse.json()
+
+    const createdResponse = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/statuses/${firstWorkspace.id}/in-progress`,
+    })
+    assert.equal(createdResponse.statusCode, 201)
+    assert.equal(createdResponse.json().name, 'In Progress')
+    assert.equal(createdResponse.json().color, '#3B82F6')
+
+    const resolvedAgainResponse = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/statuses/${firstWorkspace.id}/in-progress`,
+    })
+    assert.equal(resolvedAgainResponse.statusCode, 200)
+    assert.equal(resolvedAgainResponse.json().id, createdResponse.json().id)
+
+    const secondWorkspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Existing Status Workspace', slug: `existing-lifecycle-${Date.now()}` },
+    })
+    assert.equal(secondWorkspaceResponse.statusCode, 201)
+    const secondWorkspace = secondWorkspaceResponse.json()
+    const customStatusResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks/statuses',
+      payload: { workspaceId: secondWorkspace.id, name: 'in progress', color: '#123456' },
+    })
+    assert.equal(customStatusResponse.statusCode, 201)
+
+    const reusedResponse = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/statuses/${secondWorkspace.id}/in-progress`,
+    })
+    assert.equal(reusedResponse.statusCode, 200)
+    assert.equal(reusedResponse.json().id, customStatusResponse.json().id)
+    assert.equal(reusedResponse.json().color, '#123456')
+
+    const missingResponse = await server.inject({
+      method: 'POST',
+      url: `/api/tasks/statuses/${crypto.randomUUID()}/in-progress`,
+    })
+    assert.equal(missingResponse.statusCode, 404)
+  } finally {
+    await server.close()
+  }
+})
+
 test('GET /api/tasks/:id/activity returns activity rows', async () => {
   const server = await createServer()
   try {

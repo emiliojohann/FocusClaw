@@ -73,6 +73,8 @@ Status output is compact by default: tasks are grouped by project and show title
 Add, edit, delete, and complete actions stay as agent tool actions using natural language. Examples:
 
 - `Add a task to Launch Plan: prepare screenshots, due Friday.`
+- `Start the onboarding checklist.`
+- `Move the onboarding checklist back to To Do.`
 - `Mark the onboarding checklist complete.`
 - `Delete the task about drafting the first content batch.`
 
@@ -80,7 +82,7 @@ OpenClaw and Hermes should find tasks by title/project before asking users for t
 
 ### Projects And Tasks
 
-Create projects, add tasks, set priority, choose due dates, assign owner labels, and mark work complete from the web app.
+Create projects, add tasks, set priority, choose due dates, assign owner labels, move work between To Do and In Progress, and mark work complete from the web app.
 
 OpenClaw and Hermes can work with the same records through the local Agent Automation API. This keeps human task planning and agent execution context in one structured place.
 

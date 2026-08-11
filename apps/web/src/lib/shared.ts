@@ -9,7 +9,7 @@ export const PRIORITY_CONFIG: Record<number, { label: string; badge: string; ico
 
 export const TAG_COLORS = [
   { bg: 'rgba(245,61,45,0.15)', border: 'rgba(245,61,45,0.3)', text: '#f53d2d' },
-  { bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.3)', text: '#22c55e' },
+  { bg: 'var(--tag-green-bg)', border: 'var(--tag-green-border)', text: 'var(--tag-green)' },
   { bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.3)', text: '#3b82f6' },
   { bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.3)', text: '#a855f7' },
   { bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', text: '#f97316' },

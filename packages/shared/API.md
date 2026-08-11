@@ -14,7 +14,7 @@ Read-only status uses plain-text triggers handled by OpenClaw, Hermes, an agent/
 - `focusclaw week`
 - `focusclaw project Launch Plan`
 
-The plugin should keep these summaries compact by default: group by project, show title plus due-date/status signal, and hide tags, descriptions, and task IDs unless detailed output is explicitly requested. Add, edit, complete, and delete remain agent tool actions using the REST endpoints below.
+The plugin should keep these summaries compact by default: group by project, show title plus due-date/status signal, and hide tags, descriptions, and task IDs unless detailed output is explicitly requested. Add, edit, start/In Progress, return to To Do, complete, and delete remain agent tool actions using the REST endpoints below.
 
 ## Current Endpoints
 
@@ -34,6 +34,8 @@ The plugin should keep these summaries compact by default: group by project, sho
 | `POST` | `/api/tasks` | Create task |
 | `GET` | `/api/tasks/:id` | Get task |
 | `PATCH` | `/api/tasks/:id` | Update task fields |
+| `GET` | `/api/tasks/statuses/:workspaceId` | List workspace status definitions |
+| `POST` | `/api/tasks/statuses/:workspaceId/in-progress` | Resolve or create the workspace's In Progress status |
 | `DELETE` | `/api/tasks/:id` | Delete task |
 | `POST` | `/api/tasks/bulk-delete` | Delete up to 5,000 tasks and their related records in one transaction |
 | `POST` | `/api/tasks/:id/complete` | Mark task complete |

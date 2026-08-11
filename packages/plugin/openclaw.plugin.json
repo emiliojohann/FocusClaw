@@ -2,7 +2,7 @@
   "id": "focusclaw",
   "name": "FocusClaw",
   "description": "Task context for OpenClaw. Read status, create tasks, update work, and complete FocusClaw tasks from agent workflows.",
-  "version": "2026.8.5-1",
+  "version": "2026.8.11",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

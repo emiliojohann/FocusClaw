@@ -68,6 +68,8 @@ interface TaskPanelProps {
   editRecurring: string
   editTags: string[]
   saving: boolean
+  lifecycleChanging?: boolean
+  isInProgress?: boolean
   
   // Comments & subtasks
   comments: CommentEntry[]
@@ -101,6 +103,7 @@ interface TaskPanelProps {
   // Handlers
   onClose: () => void
   onSave: () => void
+  onLifecycleChange?: (lifecycle: 'todo' | 'inProgress' | 'done') => Promise<void> | void
   onReopen?: () => void
   onDelete?: () => void
   onAddSubtask: () => void
@@ -206,6 +209,8 @@ export function TaskPanel({
   editRecurring,
   editTags,
   saving,
+  lifecycleChanging = false,
+  isInProgress = false,
   comments,
   subtasks,
   attachments,
@@ -232,6 +237,7 @@ export function TaskPanel({
   setNewSubtaskPriority,
   onClose,
   onSave,
+  onLifecycleChange,
   onReopen,
   onDelete,
   onAddSubtask,
@@ -446,6 +452,34 @@ export function TaskPanel({
             </div>
           ) : (
             <div className="fc-task-panel-content p-5 space-y-5">
+              {/* Lifecycle */}
+              {onLifecycleChange ? (
+                <div>
+                  <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Status</label>
+                  <div className="grid grid-cols-3 gap-1 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-1" role="group" aria-label="Task status">
+                    {([
+                      ['todo', 'To Do'],
+                      ['inProgress', 'In Progress'],
+                      ['done', 'Done'],
+                    ] as const).map(([value, label]) => {
+                      const active = value === 'done' ? !!selectedTask?.archived : value === 'inProgress' ? !selectedTask?.archived && isInProgress : !selectedTask?.archived && !isInProgress
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => void onLifecycleChange(value)}
+                          disabled={lifecycleChanging || active}
+                          aria-pressed={active}
+                          className={`min-w-0 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${active ? (value === 'inProgress' ? 'bg-[var(--in-progress-bg)] text-[var(--in-progress)] ring-1 ring-[var(--in-progress-border)]' : 'bg-[var(--bg-elevated)] text-white ring-1 ring-[var(--border)]') : 'text-zinc-500 hover:bg-[var(--bg-elevated)] hover:text-zinc-300'}`}
+                        >
+                          <span className="block truncate">{label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               {/* Title */}
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Title</label>
@@ -723,10 +757,8 @@ export function TaskPanel({
               </button>
 
               {/* Completion / Delete */}
-              {selectedTask?.archived && onReopen ? (
-                <button onClick={onReopen} className="btn btn-secondary w-full">
-                  Reopen Task
-                </button>
+              {selectedTask?.archived && onReopen && !onLifecycleChange ? (
+                <button onClick={onReopen} className="btn btn-secondary w-full">Reopen Task</button>
               ) : null}
               {showDelete && onDelete ? (
                 <div className="flex items-center justify-between pt-1">
