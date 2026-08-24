@@ -59,6 +59,7 @@ interface Task {
   subtaskTotal?: number
   subtaskCompleted?: number
   attachmentTotal?: number
+  highlight?: boolean
 }
 
 interface CommentEntry {
@@ -131,7 +132,7 @@ function calendarCacheSnapshot(tasks: Task[] = lastCalendarTasks, overviewTasks:
 
 const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: string; bgColor: string; borderColor: string; shadowColor: string; activeTextColor: string }> = {
   1: { label: 'Critical', badge: 'badge-critical', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)', shadowColor: 'rgba(239,68,68,0.15)', activeTextColor: '#ffffff' },
-  2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.3)', shadowColor: 'rgba(249,115,22,0.15)', activeTextColor: '#18181b' },
+  2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.3)', shadowColor: 'rgba(249,115,22,0.15)', activeTextColor: 'var(--priority-high-active-text)' },
   3: { label: 'Medium', badge: 'badge-medium', color: 'var(--priority-medium)', bgColor: 'var(--priority-medium-bg)', borderColor: 'var(--priority-medium-border)', shadowColor: 'var(--priority-medium-bg)', activeTextColor: 'var(--priority-medium-active-text)' },
   4: { label: 'Low', badge: 'badge-low', color: '#71717a', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', shadowColor: 'rgba(113,113,122,0.14)', activeTextColor: '#ffffff' },
 }
@@ -233,6 +234,11 @@ function AttachmentIndicator({ count = 0, compact = false }: { count?: number; c
   )
 }
 
+function HighlightCorner({ highlighted }: { highlighted?: boolean }) {
+  if (!highlighted) return null
+  return <span className="fc-highlight-corner" title="Highlight" aria-label="Highlight" />
+}
+
 function CalendarTaskChip({ task, onOpen }: { task: Task; onOpen: (task: Task) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `task:${task.id}`,
@@ -264,12 +270,13 @@ function CalendarTaskChip({ task, onOpen }: { task: Task; onOpen: (task: Task) =
       {...listeners}
       {...attributes}
       onClick={() => onOpen(task)}
-      className={`group w-full text-left px-2 py-1.5 rounded-lg transition-all hover:opacity-90 hover:shadow-sm touch-none ${
+      className={`group relative w-full overflow-hidden text-left px-2 py-1.5 rounded-lg transition-all hover:opacity-90 hover:shadow-sm touch-none ${
         isCompleted ? 'cursor-pointer' : isDragging ? 'cursor-grabbing scale-[1.02]' : 'cursor-grab active:cursor-grabbing'
       }`}
       style={style}
       title={task.title}
     >
+      <HighlightCorner highlighted={task.highlight} />
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-[11px] leading-4">{task.title}</span>
         <SubtaskIndicator task={task} compact />
@@ -344,12 +351,13 @@ function CalendarAgendaTaskRow({
     <button
       type="button"
       onClick={() => onOpen(task)}
-      className={`w-full rounded-xl border p-3 text-left transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${compactBadges ? 'fc-calendar-overflow-task-row' : ''}`}
+      className={`relative w-full overflow-hidden rounded-xl border p-3 text-left transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${compactBadges ? 'fc-calendar-overflow-task-row' : ''}`}
       style={{
         background: isCompleted ? 'rgba(113,113,122,0.10)' : priority.bgColor,
         borderColor: isCompleted ? 'rgba(113,113,122,0.28)' : priority.borderColor,
       }}
     >
+      <HighlightCorner highlighted={task.highlight} />
       <span className="flex items-center gap-2 min-w-0">
         <span
           className="h-8 w-1 rounded-full shrink-0"
@@ -387,6 +395,7 @@ function CalendarAgendaTaskRow({
 
 function compareAgendaTasks(a: Task, b: Task): number {
   if (!!a.archived !== !!b.archived) return Number(a.archived) - Number(b.archived)
+  if (!!a.highlight !== !!b.highlight) return Number(!!b.highlight) - Number(!!a.highlight)
   const priorityDiff = (a.priority || 4) - (b.priority || 4)
   if (priorityDiff !== 0) return priorityDiff
   const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0
@@ -483,6 +492,7 @@ export default function CalendarPage() {
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editPriority, setEditPriority] = useState(2)
+  const [editHighlight, setEditHighlight] = useState(false)
   const [editDueDate, setEditDueDate] = useState('')
   const [editAssignee, setEditAssignee] = useState('')
   const [editProjectId, setEditProjectId] = useState('')
@@ -805,6 +815,7 @@ export default function CalendarPage() {
     setSelectedTask(task)
     setEditTitle(task.title); setEditDescription(task.description || '')
     setEditPriority(task.priority)
+    setEditHighlight(!!task.highlight)
     setEditDueDate(dueDateToLocalDateKey(task.dueDate))
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
@@ -819,6 +830,7 @@ export default function CalendarPage() {
       ])
       setEditTitle(taskData.title); setEditDescription(taskData.description || '')
       setEditPriority(taskData.priority)
+      setEditHighlight(!!taskData.highlight)
       setEditDueDate(dueDateToLocalDateKey(taskData.dueDate))
       setEditAssignee(normalizeAssignee(taskData.assignee))
       setEditProjectId(taskData.projectId || activeProject)
@@ -843,6 +855,7 @@ export default function CalendarPage() {
       const updated = await taskApi.update(selectedTask.id, {
         title: editTitle, description: editDescription,
         priority: editPriority, dueDate: editDueDate || null,
+        highlight: editHighlight,
         assignee: serializeAssigneeForApi(editAssignee),
         projectId: editProjectId,
         recurring: editRecurring || null,
@@ -851,11 +864,16 @@ export default function CalendarPage() {
       const keepUpdatedTask = shouldKeepTaskInCalendar(updated, projectFilter, showCompleted)
       setCachedTasks((prev) => (
         keepUpdatedTask
-          ? prev.map((t) => t.id === selectedTask.id ? updated : t)
+          ? prev.map((t) => updated.highlight
+              ? { ...t, ...(t.id === updated.id ? updated : {}), highlight: t.id === updated.id }
+              : (t.id === selectedTask.id ? updated : t))
           : prev.filter((t) => t.id !== selectedTask.id)
       ))
-      setOverviewTasks((prev) => prev.map((t) => t.id === selectedTask.id ? updated : t))
-      lastCalendarOverviewTasks = lastCalendarOverviewTasks.map((t) => t.id === selectedTask.id ? updated : t)
+      const updateHighlightState = (task: Task) => updated.highlight
+        ? { ...task, ...(task.id === updated.id ? updated : {}), highlight: task.id === updated.id }
+        : (task.id === selectedTask.id ? updated : task)
+      setOverviewTasks((prev) => prev.map(updateHighlightState))
+      lastCalendarOverviewTasks = lastCalendarOverviewTasks.map(updateHighlightState)
       setSelectedTask(updated)
       closeTaskPanel()
     } catch (err) { console.error('Failed to save task:', err) }
@@ -1404,6 +1422,7 @@ export default function CalendarPage() {
           editTitle={editTitle}
           editDescription={editDescription}
           editPriority={editPriority}
+          editHighlight={editHighlight}
           editDueDate={editDueDate}
           editAssignee={editAssignee}
           editProjectId={editProjectId}
@@ -1427,6 +1446,7 @@ export default function CalendarPage() {
           setEditTitle={setEditTitle}
           setEditDescription={setEditDescription}
           setEditPriority={setEditPriority}
+          setEditHighlight={setEditHighlight}
           setEditDueDate={setEditDueDate}
           setEditAssignee={setEditAssignee}
           setEditProjectId={setEditProjectId}

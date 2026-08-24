@@ -53,6 +53,7 @@ export const tasks = sqliteTable('tasks', {
   labels: text('labels').default('[]'),
   position: integer('position').notNull().default(0),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  highlight: integer('highlight', { mode: 'boolean' }).notNull().default(false),
   recurring: text('recurring'),
   recurringEnd: integer('recurring_end', { mode: 'timestamp' }),
   dependsOn: text('depends_on').default('[]'),

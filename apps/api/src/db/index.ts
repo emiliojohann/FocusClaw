@@ -67,6 +67,7 @@ function initSchema() {
       labels TEXT DEFAULT '[]',
       position INTEGER NOT NULL DEFAULT 0,
       archived INTEGER NOT NULL DEFAULT 0,
+      highlight INTEGER NOT NULL DEFAULT 0,
       recurring TEXT,
       recurring_end INTEGER,
       depends_on TEXT DEFAULT '[]',
@@ -259,5 +260,46 @@ function normalizeLegacyTaskLabelsToTags() {
 }
 
 initSchema()
+ensureColumn('tasks', 'highlight', 'highlight INTEGER NOT NULL DEFAULT 0')
+sqlite.exec('CREATE INDEX IF NOT EXISTS idx_tasks_highlight ON tasks(highlight)')
+sqlite.exec(`
+  CREATE TRIGGER IF NOT EXISTS trg_tasks_single_workspace_highlight_insert
+  AFTER INSERT ON tasks
+  WHEN NEW.highlight = 1
+  BEGIN
+    UPDATE tasks
+    SET highlight = 0
+    WHERE id != NEW.id
+      AND highlight = 1
+      AND project_id IN (
+        SELECT sibling_project.id
+        FROM projects sibling_project
+        WHERE sibling_project.workspace_id = (
+          SELECT current_project.workspace_id
+          FROM projects current_project
+          WHERE current_project.id = NEW.project_id
+        )
+      );
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS trg_tasks_single_workspace_highlight
+  AFTER UPDATE OF highlight, project_id ON tasks
+  WHEN NEW.highlight = 1
+  BEGIN
+    UPDATE tasks
+    SET highlight = 0
+    WHERE id != NEW.id
+      AND highlight = 1
+      AND project_id IN (
+        SELECT sibling_project.id
+        FROM projects sibling_project
+        WHERE sibling_project.workspace_id = (
+          SELECT current_project.workspace_id
+          FROM projects current_project
+          WHERE current_project.id = NEW.project_id
+        )
+      );
+  END;
+`)
 migrateTagsToUniversal()
 normalizeLegacyTaskLabelsToTags()

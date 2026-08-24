@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   labels TEXT DEFAULT '[]',
   position INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
+  highlight INTEGER NOT NULL DEFAULT 0,
   recurring TEXT,
   recurring_end INTEGER,
   depends_on TEXT DEFAULT '[]',
@@ -107,6 +108,45 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_id ON tasks(status_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_highlight ON tasks(highlight);
+
+CREATE TRIGGER IF NOT EXISTS trg_tasks_single_workspace_highlight_insert
+AFTER INSERT ON tasks
+WHEN NEW.highlight = 1
+BEGIN
+  UPDATE tasks
+  SET highlight = 0
+  WHERE id != NEW.id
+    AND highlight = 1
+    AND project_id IN (
+      SELECT sibling_project.id
+      FROM projects sibling_project
+      WHERE sibling_project.workspace_id = (
+        SELECT current_project.workspace_id
+        FROM projects current_project
+        WHERE current_project.id = NEW.project_id
+      )
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_tasks_single_workspace_highlight
+AFTER UPDATE OF highlight, project_id ON tasks
+WHEN NEW.highlight = 1
+BEGIN
+  UPDATE tasks
+  SET highlight = 0
+  WHERE id != NEW.id
+    AND highlight = 1
+    AND project_id IN (
+      SELECT sibling_project.id
+      FROM projects sibling_project
+      WHERE sibling_project.workspace_id = (
+        SELECT current_project.workspace_id
+        FROM projects current_project
+        WHERE current_project.id = NEW.project_id
+      )
+    );
+END;
 CREATE INDEX IF NOT EXISTS idx_activity_log_task_id ON activity_log(task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
 CREATE INDEX IF NOT EXISTS idx_task_tags_task_id ON task_tags(task_id);

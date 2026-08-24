@@ -130,6 +130,7 @@ export const taskApi = {
     recurring: string | null
     recurringEnd: string | null
     dependsOn: string[]
+    highlight: boolean
   }>) =>
     request<any>(`/tasks/${taskId}`, {
       method: 'PATCH',
@@ -139,10 +140,10 @@ export const taskApi = {
     request<{ success: boolean; recurring: boolean }>(`/tasks/${taskId}/complete`, {
       method: 'POST',
     }),
-  reorder: (projectId: string, taskIds: string[]) =>
+  reorder: (taskIds: string[]) =>
     request<{ success: boolean }>('/tasks/reorder', {
       method: 'POST',
-      body: JSON.stringify({ projectId, taskIds }),
+      body: JSON.stringify({ taskIds }),
     }),
   // Subtasks
   getSubtasks: (taskId: string) =>

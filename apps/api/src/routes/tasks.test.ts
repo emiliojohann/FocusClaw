@@ -7,6 +7,7 @@ import { join } from 'node:path'
 process.env.DATABASE_URL = `sqlite:${join(mkdtempSync(join(tmpdir(), 'focusclaw-test-')), 'focusclaw.db')}`
 
 const { createServer } = await import('../server')
+const { sqlite } = await import('../db')
 
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -1026,6 +1027,161 @@ test('bulk delete removes selected tasks and their related records only', async 
 
     const remaining = (await server.inject({ method: 'GET', url: `/api/tasks/project/${project.id}` })).json()
     assert.deepEqual(remaining.map((task: any) => task.id), [retained.id])
+  } finally {
+    await server.close()
+  }
+})
+
+test('manual ordering persists an arbitrary sequence within a priority group across projects', async () => {
+  const server = await createServer()
+  try {
+    const workspaceResponse = await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Manual Order Workspace', slug: `manual-order-${Date.now()}` },
+    })
+    assert.equal(workspaceResponse.statusCode, 201)
+
+    const firstProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspaceResponse.json().id, name: 'First Project' },
+    })
+    const secondProjectResponse = await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspaceResponse.json().id, name: 'Second Project' },
+    })
+    assert.equal(firstProjectResponse.statusCode, 201)
+    assert.equal(secondProjectResponse.statusCode, 201)
+
+    const projectIds = [firstProjectResponse.json().id, secondProjectResponse.json().id]
+    const createdTasks = []
+    for (let index = 1; index <= 5; index += 1) {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/tasks',
+        payload: { projectId: projectIds[(index - 1) % 2], title: String(index), priority: 1 },
+      })
+      assert.equal(response.statusCode, 201)
+      createdTasks.push(response.json())
+    }
+
+    const desiredOrder = [createdTasks[4], createdTasks[2], createdTasks[3], createdTasks[0], createdTasks[1]]
+    const reorderResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks/reorder',
+      payload: { taskIds: desiredOrder.map((task) => task.id) },
+    })
+    assert.equal(reorderResponse.statusCode, 200)
+    assert.equal(reorderResponse.json().reorderedCount, 5)
+
+    const projectTaskLists = await Promise.all(projectIds.map(async (projectId) => (
+      await server.inject({ method: 'GET', url: `/api/tasks/project/${projectId}?sort=manual&order=asc` })
+    ).json()))
+    const persistedOrder = projectTaskLists
+      .flat()
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((task: any) => task.title)
+    assert.deepEqual(persistedOrder, ['5', '3', '4', '1', '2'])
+
+    const lowPriorityResponse = await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: projectIds[0], title: 'Low priority', priority: 4 },
+    })
+    assert.equal(lowPriorityResponse.statusCode, 201)
+
+    const mixedPriorityReorder = await server.inject({
+      method: 'POST',
+      url: '/api/tasks/reorder',
+      payload: { taskIds: [desiredOrder[0].id, lowPriorityResponse.json().id] },
+    })
+    assert.equal(mixedPriorityReorder.statusCode, 400)
+    assert.equal(mixedPriorityReorder.json().error, 'Manual ordering works within one priority group')
+
+    const firstProjectManual = (await server.inject({
+      method: 'GET',
+      url: `/api/tasks/project/${projectIds[0]}?sort=manual&order=asc`,
+    })).json()
+    assert.equal(firstProjectManual.at(-1).title, 'Low priority')
+  } finally {
+    await server.close()
+  }
+})
+
+test('Highlight is unique per workspace, pinned first, rotates to today, and clears on completion', async () => {
+  const server = await createServer()
+  try {
+    const workspace = (await server.inject({
+      method: 'POST',
+      url: '/api/workspaces',
+      payload: { name: 'Highlight Workspace', slug: `highlight-${Date.now()}` },
+    })).json()
+    const firstProject = (await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'First' },
+    })).json()
+    const secondProject = (await server.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Second' },
+    })).json()
+    const regularTask = (await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: secondProject.id, title: 'Critical regular task', priority: 1 },
+    })).json()
+    const firstHighlight = (await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: firstProject.id, title: 'First highlight', priority: 1 },
+    })).json()
+    const secondHighlight = (await server.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { projectId: secondProject.id, title: 'Second highlight', priority: 4 },
+    })).json()
+
+    const firstAssignment = await server.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${firstHighlight.id}`,
+      payload: { highlight: true },
+    })
+    assert.equal(firstAssignment.statusCode, 200)
+    assert.equal(firstAssignment.json().highlight, true)
+    assert.equal(localDateKey(new Date(firstAssignment.json().dueDate)), localDateKey(new Date()))
+
+    const replacement = await server.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${secondHighlight.id}`,
+      payload: { highlight: true },
+    })
+    assert.equal(replacement.statusCode, 200)
+    assert.equal(replacement.json().highlight, true)
+    assert.equal((await server.inject({ method: 'GET', url: `/api/tasks/${firstHighlight.id}` })).json().highlight, false)
+
+    const ordered = (await server.inject({
+      method: 'GET',
+      url: `/api/tasks/project/${secondProject.id}?sort=priority&order=asc`,
+    })).json()
+    assert.deepEqual(ordered.map((task: any) => task.id), [secondHighlight.id, regularTask.id])
+
+    const yesterday = addDays(new Date(), -1)
+    sqlite.prepare('UPDATE tasks SET due_date = ? WHERE id = ?')
+      .run(Math.floor(yesterday.getTime() / 1000), secondHighlight.id)
+    const rotated = (await server.inject({
+      method: 'GET',
+      url: `/api/tasks/project/${secondProject.id}`,
+    })).json().find((task: any) => task.id === secondHighlight.id)
+    assert.equal(localDateKey(new Date(rotated.dueDate)), localDateKey(new Date()))
+
+    const completed = await server.inject({ method: 'POST', url: `/api/tasks/${secondHighlight.id}/complete` })
+    assert.equal(completed.statusCode, 200)
+    const completedTask = (await server.inject({ method: 'GET', url: `/api/tasks/${secondHighlight.id}` })).json()
+    assert.equal(completedTask.archived, true)
+    assert.equal(completedTask.highlight, false)
   } finally {
     await server.close()
   }

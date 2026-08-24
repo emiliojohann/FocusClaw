@@ -6,7 +6,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import Database, { Database as BetterSqliteDatabase } from 'better-sqlite3'
 import { sqlite } from '../db'
 
-const APP_VERSION = 'v2026.08.11'
+const APP_VERSION = 'v2026.08.24'
 const SCHEMA_VERSION = 'sqlite-v1'
 const FORMAT_VERSION = 1
 const BACKUP_DIR = resolve(homedir(), '.focusclaw', 'backups')
@@ -85,6 +85,7 @@ const TABLE_COLUMNS: Record<typeof TABLES[number], string[]> = {
     'labels',
     'position',
     'archived',
+    'highlight',
     'recurring',
     'recurring_end',
     'depends_on',

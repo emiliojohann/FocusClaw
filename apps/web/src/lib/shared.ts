@@ -2,7 +2,7 @@ import { BarChart3, Bot, Circle, User } from 'lucide-react'
 
 export const PRIORITY_CONFIG: Record<number, { label: string; badge: string; icon: typeof BarChart3; color: string; bgColor: string; borderColor: string; activeTextColor: string }> = {
   1: { label: 'Critical', badge: 'badge-critical', icon: BarChart3, color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.2)', activeTextColor: '#ffffff' },
-  2: { label: 'High', badge: 'badge-high', icon: BarChart3, color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.2)', activeTextColor: '#18181b' },
+  2: { label: 'High', badge: 'badge-high', icon: BarChart3, color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.2)', activeTextColor: 'var(--priority-high-active-text)' },
   3: { label: 'Medium', badge: 'badge-medium', icon: BarChart3, color: 'var(--priority-medium)', bgColor: 'var(--priority-medium-bg)', borderColor: 'var(--priority-medium-border)', activeTextColor: 'var(--priority-medium-active-text)' },
   4: { label: 'Low', badge: 'badge-low', icon: BarChart3, color: '#a1a1aa', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', activeTextColor: '#18181b' },
 }

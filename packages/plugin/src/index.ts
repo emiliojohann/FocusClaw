@@ -26,6 +26,7 @@ type Task = {
   labels?: string | string[]
   tags?: Array<{ name: string }>
   archived?: boolean
+  highlight?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -100,6 +101,7 @@ const UpdateTaskParams = Type.Object({
   assigneeId: Type.Optional(Type.String({ description: 'New owner label or assignee user ID' })),
   labels: Type.Optional(Type.Array(Type.String(), { description: 'Replacement labels/tags' })),
   archived: Type.Optional(Type.Boolean({ description: 'Archive or unarchive the task' })),
+  highlight: Type.Optional(Type.Boolean({ description: 'Make this the workspace Highlight. Assigning true automatically replaces the previous Highlight and moves this task to today.' })),
 })
 
 const CompleteTaskParams = Type.Object({
@@ -488,6 +490,7 @@ export default definePluginEntry({
             `ID: ${task.id}`,
             `Status: ${task.archived ? 'completed' : task.statusId || 'open'}`,
             `Priority: ${task.priority ?? 'none'}`,
+            `Highlight: ${task.highlight ? 'yes' : 'no'}`,
             `Due: ${formatDate(task.dueDate)}`,
             `Owner: ${task.assignee || 'unassigned'}`,
             `Tags: ${labels.length ? labels.join(', ') : 'none'}`,

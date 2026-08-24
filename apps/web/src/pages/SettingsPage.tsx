@@ -734,6 +734,7 @@ export default function SettingsPage() {
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Tasks: Default Sort</label>
                 <select value={defaultSort} onChange={(e) => setDefaultSort(e.target.value as TaskSort)} className="input text-xs fc-control fc-select-control w-full">
+                  <option value="manual">Manual</option>
                   <option value="priority">Priority</option>
                   <option value="dueDate">Due Date</option>
                   <option value="createdAt">Created</option>

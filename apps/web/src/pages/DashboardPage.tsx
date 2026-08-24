@@ -4,7 +4,7 @@ import { taskApi, tagApi, statusApi } from '@/lib/api'
 import {
   Check, Plus, X,
   ChevronRight, AlertCircle, RefreshCw, Clock, Repeat2,
-  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip, ListChecks, Play, Trash2
+  PanelLeftClose, PanelLeftOpen, LayoutGrid, List, ListTree, Search, Paperclip, ListChecks, Play, Trash2, GripVertical, Star
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { DatePicker } from '@/components/DatePicker'
@@ -33,6 +33,7 @@ import {
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
 import { dueDateToLocalDateKey } from '@/lib/dates'
+import { moveTaskAfter, moveTaskBefore, reorderManualSubset } from '@/lib/manualOrder'
 
 interface Task {
   id: string
@@ -43,6 +44,7 @@ interface Task {
   assignee?: string
   createdAt: string
   updatedAt: string
+  position: number
   projectId?: string
   archived?: boolean
   statusId?: string | null
@@ -55,6 +57,7 @@ interface Task {
   subtaskTotal?: number
   subtaskCompleted?: number
   attachmentTotal?: number
+  highlight?: boolean
 }
 
 interface TagRecord {
@@ -214,8 +217,61 @@ function AttachmentIndicator({ count = 0, className = '' }: { count?: number; cl
   )
 }
 
+function HighlightStar({ highlighted }: { highlighted?: boolean }) {
+  if (!highlighted) return null
+  return (
+    <span className="fc-highlight-star" title="Highlight" aria-label="Highlight">
+      <Star aria-hidden="true" />
+    </span>
+  )
+}
+
+function ManualDragHandle({
+  task,
+  disabled,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  className = '',
+}: {
+  task: Task
+  disabled: boolean
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>, taskId: string) => void
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void
+  onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void
+  onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void
+  className?: string
+}) {
+  return (
+    <div
+      draggable={false}
+      onDragStart={(event) => event.preventDefault()}
+      onPointerDown={(event) => onPointerDown(event, task.id)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onClick={(event) => event.stopPropagation()}
+      className={`fc-manual-drag-handle flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors sm:h-6 sm:w-6 ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-grab hover:bg-[var(--bg-elevated)] hover:text-zinc-300 active:cursor-grabbing'} ${className}`}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-label={`Drag to reorder ${task.title}`}
+      title={disabled ? 'At least two tasks with this priority are required' : 'Drag to reorder within this priority'}
+    >
+      <GripVertical className="h-4 w-4" aria-hidden="true" />
+    </div>
+  )
+}
+
 function compareTasks(a: Task, b: Task, sort: TaskSort): number {
   if (!!a.archived !== !!b.archived) return Number(a.archived) - Number(b.archived)
+  if (!!a.highlight !== !!b.highlight) return Number(!!b.highlight) - Number(!!a.highlight)
+  if (sort === 'manual') {
+    return (a.priority || 4) - (b.priority || 4)
+      || a.position - b.position
+      || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      || a.id.localeCompare(b.id)
+  }
   if (sort === 'createdAt') {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   }
@@ -402,6 +458,39 @@ export default function DashboardPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkDeleteError, setBulkDeleteError] = useState('')
   const [bulkDeleteMessage, setBulkDeleteMessage] = useState('')
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
+  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null)
+  const [manualSortError, setManualSortError] = useState('')
+  const manualOrderSaveChainRef = useRef<Promise<void>>(Promise.resolve())
+  const manualOrderRevisionRef = useRef(0)
+  const pointerDragRef = useRef<{
+    pointerId: number
+    taskId: string
+    ghost: HTMLElement
+    captureTarget: HTMLElement
+    startX: number
+    startY: number
+    collisionOffsetX: number
+    collisionOffsetY: number
+    collisionLeadY: number
+    targetTaskId: string | null
+    placeAfterTarget: boolean
+    onWindowPointerMove: (event: PointerEvent) => void
+    onWindowPointerUp: (event: PointerEvent) => void
+    onWindowPointerCancel: (event: PointerEvent) => void
+    onWindowBlur: () => void
+  } | null>(null)
+  const taskLongPressRef = useRef<{
+    pointerId: number
+    pointerType: string
+    taskId: string
+    startX: number
+    startY: number
+    timer: number
+    activated: boolean
+    taskCard: HTMLElement
+  } | null>(null)
+  const suppressTaskClickRef = useRef(false)
   const [panelLoading, setPanelLoading] = useState(false)
   const [lifecycleChanging, setLifecycleChanging] = useState(false)
   const [comments, setComments] = useState<CommentEntry[]>([])
@@ -416,6 +505,7 @@ export default function DashboardPage() {
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editPriority, setEditPriority] = useState(2)
+  const [editHighlight, setEditHighlight] = useState(false)
   const [editDueDate, setEditDueDate] = useState('')
   const [editAssignee, setEditAssignee] = useState('')
   const [editProjectId, setEditProjectId] = useState('')
@@ -424,6 +514,54 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false)
   const [resetSpinning, setResetSpinning] = useState(false)
   const lastDashboardLoadKey = useRef('')
+
+  useEffect(() => {
+    const preventTouchScrollDuringManualDrag = (event: TouchEvent) => {
+      if (pointerDragRef.current) event.preventDefault()
+    }
+    window.addEventListener('touchmove', preventTouchScrollDuringManualDrag, { passive: false })
+    return () => window.removeEventListener('touchmove', preventTouchScrollDuringManualDrag)
+  }, [])
+
+  const removeManualPointerListeners = (drag: NonNullable<typeof pointerDragRef.current>) => {
+    window.removeEventListener('pointermove', drag.onWindowPointerMove, true)
+    window.removeEventListener('pointerup', drag.onWindowPointerUp, true)
+    window.removeEventListener('pointercancel', drag.onWindowPointerCancel, true)
+    window.removeEventListener('blur', drag.onWindowBlur)
+  }
+
+  const clearPendingTaskLongPress = () => {
+    const pending = taskLongPressRef.current
+    if (!pending) return
+    window.clearTimeout(pending.timer)
+    try {
+      if (pending.taskCard.hasPointerCapture(pending.pointerId)) {
+        pending.taskCard.releasePointerCapture(pending.pointerId)
+      }
+    } catch {
+      // Pointer capture may already have ended naturally.
+    }
+    taskLongPressRef.current = null
+  }
+
+  const cancelActiveManualInteraction = () => {
+    clearPendingTaskLongPress()
+    const drag = pointerDragRef.current
+    if (drag) {
+      removeManualPointerListeners(drag)
+      drag.ghost.remove()
+      try {
+        if (drag.captureTarget.hasPointerCapture(drag.pointerId)) {
+          drag.captureTarget.releasePointerCapture(drag.pointerId)
+        }
+      } catch {
+        // The interaction is already cancelled; disconnected elements can throw here.
+      }
+      pointerDragRef.current = null
+    }
+    setDraggedTaskId(null)
+    setDragOverTaskId(null)
+  }
 
   useEffect(() => {
     if (!showNewTaskForm) return
@@ -448,6 +586,7 @@ export default function DashboardPage() {
     })
   }
   const toggleViewMode = () => {
+    cancelActiveManualInteraction()
     setViewModeState((mode) => {
       const nextMode = mode === 'list' ? 'grid' : 'list'
       setTaskViewMode(nextMode)
@@ -902,6 +1041,7 @@ export default function DashboardPage() {
     setSelectedTask(task)
     setEditTitle(task.title); setEditDescription(task.description || '')
     setEditPriority(task.priority)
+    setEditHighlight(!!task.highlight)
     setEditDueDate(dueDateToLocalDateKey(task.dueDate))
     setEditAssignee(normalizeAssignee(task.assignee))
     setEditProjectId(task.projectId || activeProject)
@@ -914,6 +1054,7 @@ export default function DashboardPage() {
       ])
       setEditTitle(taskData.title); setEditDescription(taskData.description || '')
       setEditPriority(taskData.priority)
+      setEditHighlight(!!taskData.highlight)
       setEditDueDate(dueDateToLocalDateKey(taskData.dueDate))
       setEditAssignee(normalizeAssignee(taskData.assignee))
       setEditProjectId(taskData.projectId || activeProject)
@@ -933,6 +1074,7 @@ export default function DashboardPage() {
       const updated = await taskApi.update(selectedTask.id, {
         title: editTitle, description: editDescription,
         priority: editPriority, dueDate: editDueDate || null,
+        highlight: editHighlight,
         assignee: serializeAssigneeForApi(editAssignee),
         projectId: editProjectId,
         recurring: editRecurring || null,
@@ -948,7 +1090,10 @@ export default function DashboardPage() {
       })
       setCachedTasks((prev) => (
         keepUpdatedTask
-          ? prev.map((t) => t.id === selectedTask.id ? updated : t).sort((a, b) => compareTasks(a, b, sort))
+          ? prev.map((t) => updated.highlight
+              ? { ...t, ...(t.id === updated.id ? updated : {}), highlight: t.id === updated.id }
+              : (t.id === selectedTask.id ? updated : t))
+            .sort((a, b) => compareTasks(a, b, sort))
           : prev.filter((t) => t.id !== selectedTask.id)
       ))
       setSelectedTask(updated)
@@ -1098,6 +1243,363 @@ export default function DashboardPage() {
   const displayedStats = getTaskOverviewStats(filteredTasks)
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]))
   const showBlockingLoader = showColdLoadSkeleton && tasks.length === 0
+  const manualGroupSize = (task: Task) => task.highlight ? 0 : filteredTasks.filter((candidate) => (
+    !candidate.highlight && candidate.priority === task.priority && !!candidate.archived === !!task.archived
+  )).length
+
+  const clearManualDragState = () => {
+    setDraggedTaskId(null)
+    setDragOverTaskId(null)
+  }
+
+  const applyManualOrder = (draggedId: string, targetTaskId: string, placeAfterTarget: boolean) => {
+    if (draggedId === targetTaskId) {
+      clearManualDragState()
+      return
+    }
+
+    const draggedTask = filteredTasks.find((task) => task.id === draggedId)
+    const targetTask = filteredTasks.find((task) => task.id === targetTaskId)
+    if (!draggedTask || !targetTask || draggedTask.highlight || targetTask.highlight
+      || draggedTask.priority !== targetTask.priority || !!draggedTask.archived !== !!targetTask.archived) {
+      clearManualDragState()
+      return
+    }
+
+    const currentOrder = filteredTasks
+      .filter((task) => !task.highlight && task.priority === draggedTask.priority && !!task.archived === !!draggedTask.archived)
+      .map((task) => task.id)
+    const nextOrder = placeAfterTarget
+      ? moveTaskAfter(currentOrder, draggedId, targetTaskId)
+      : moveTaskBefore(currentOrder, draggedId, targetTaskId)
+    if (nextOrder.join('|') === currentOrder.join('|')) {
+      clearManualDragState()
+      return
+    }
+
+    setSort('manual')
+    setTaskViewState({ sort: 'manual' })
+    setCachedTasks((current) => reorderManualSubset(current, nextOrder))
+    clearManualDragState()
+    setManualSortError('')
+
+    const revision = ++manualOrderRevisionRef.current
+    const persistOrder = async () => {
+      try {
+        await taskApi.reorder(nextOrder)
+        if (revision === manualOrderRevisionRef.current) setManualSortError('')
+      } catch (error) {
+        if (revision !== manualOrderRevisionRef.current) return
+        setManualSortError(error instanceof Error ? error.message : 'Could not save the manual order')
+        await loadTasks({ sortOverride: 'manual' })
+      }
+    }
+    manualOrderSaveChainRef.current = manualOrderSaveChainRef.current.then(persistOrder, persistOrder)
+  }
+
+  const startManualPointerDrag = (
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    captureTarget: HTMLElement,
+    taskId: string,
+    taskCard: HTMLElement,
+  ) => {
+    const task = filteredTasks.find((candidate) => candidate.id === taskId)
+    if (!task || task.highlight || !taskCard || manualGroupSize(task) < 2) return
+    if (pointerDragRef.current) cancelActiveManualInteraction()
+
+    try {
+      captureTarget.setPointerCapture(pointerId)
+    } catch {
+      // Window-level listeners below keep the gesture reliable when pointer
+      // capture is unavailable or a browser drops it during a fast drag.
+    }
+    const bounds = taskCard.getBoundingClientRect()
+    const ghost = taskCard.cloneNode(true) as HTMLElement
+    ghost.removeAttribute('data-task-id')
+    ghost.setAttribute('aria-hidden', 'true')
+    Object.assign(ghost.style, {
+      position: 'fixed',
+      zIndex: '9999',
+      pointerEvents: 'none',
+      width: `${bounds.width}px`,
+      height: `${bounds.height}px`,
+      left: `${bounds.left}px`,
+      top: `${bounds.top}px`,
+      margin: '0',
+      opacity: '0.94',
+      boxShadow: '0 18px 48px rgba(0, 0, 0, 0.45)',
+      transform: 'translate3d(0, 0, 0) scale(1.015)',
+      transformOrigin: 'center',
+      willChange: 'transform',
+      transition: 'opacity 100ms ease, box-shadow 100ms ease',
+    })
+    document.body.appendChild(ghost)
+
+    const onWindowPointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      if (event.cancelable) event.preventDefault()
+      updateManualPointerDrag(event.pointerId, event.clientX, event.clientY)
+    }
+    const onWindowPointerUp = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      if (event.cancelable) event.preventDefault()
+      updateManualPointerDrag(event.pointerId, event.clientX, event.clientY)
+      const pending = taskLongPressRef.current
+      if (pending?.pointerId === event.pointerId) {
+        const wasActivated = pending.activated
+        clearPendingTaskLongPress()
+        if (wasActivated) {
+          suppressTaskClickRef.current = true
+          window.setTimeout(() => { suppressTaskClickRef.current = false }, 500)
+        }
+      }
+      void finishManualPointerDragById(event.pointerId)
+    }
+    const onWindowPointerCancel = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      clearPendingTaskLongPress()
+      void finishManualPointerDragById(event.pointerId, true)
+    }
+    const onWindowBlur = () => { void finishManualPointerDragById(pointerId, true) }
+    const drag = {
+      pointerId,
+      taskId,
+      ghost,
+      captureTarget,
+      startX: clientX,
+      startY: clientY,
+      collisionOffsetX: bounds.left + bounds.width / 2 - clientX,
+      collisionOffsetY: bounds.top + bounds.height / 2 - clientY,
+      collisionLeadY: bounds.height / 6,
+      targetTaskId: null,
+      placeAfterTarget: false,
+      onWindowPointerMove,
+      onWindowPointerUp,
+      onWindowPointerCancel,
+      onWindowBlur,
+    }
+    pointerDragRef.current = drag
+    window.addEventListener('pointermove', onWindowPointerMove, { capture: true, passive: false })
+    window.addEventListener('pointerup', onWindowPointerUp, { capture: true, passive: false })
+    window.addEventListener('pointercancel', onWindowPointerCancel, true)
+    window.addEventListener('blur', onWindowBlur)
+    setManualSortError('')
+    setDraggedTaskId(taskId)
+  }
+
+  const updateManualPointerDrag = (pointerId: number, clientX: number, clientY: number) => {
+    const drag = pointerDragRef.current
+    if (!drag || drag.pointerId !== pointerId) return
+    drag.ghost.style.transform = `translate3d(${clientX - drag.startX}px, ${clientY - drag.startY}px, 0) scale(1.015)`
+
+    const listDirection = Math.sign(clientY - drag.startY)
+    const collisionX = viewMode === 'list' ? clientX + drag.collisionOffsetX : clientX
+    const collisionY = viewMode === 'list'
+      ? clientY + drag.collisionOffsetY + listDirection * drag.collisionLeadY
+      : clientY
+    const pointedCard = document.elementFromPoint(collisionX, collisionY)?.closest<HTMLElement>('[data-task-id]') || null
+    const draggedTask = filteredTasks.find((task) => task.id === drag.taskId)
+    const isValidTarget = (card: HTMLElement) => {
+      const task = filteredTasks.find((candidate) => candidate.id === card.dataset.taskId)
+      return !!task && !task.highlight && task.id !== drag.taskId && !!draggedTask && !draggedTask.highlight
+        && task.priority === draggedTask.priority && !!task.archived === !!draggedTask.archived
+    }
+    let targetCard = pointedCard && isValidTarget(pointedCard) ? pointedCard : null
+    if (!targetCard && pointedCard?.dataset.taskId !== drag.taskId) {
+      let nearestDistance = Number.POSITIVE_INFINITY
+      document.querySelectorAll<HTMLElement>('[data-task-id]').forEach((card) => {
+        if (!isValidTarget(card)) return
+        const bounds = card.getBoundingClientRect()
+        if (bounds.bottom < 0 || bounds.top > window.innerHeight || bounds.right < 0 || bounds.left > window.innerWidth) return
+        const deltaX = Math.max(bounds.left - collisionX, 0, collisionX - bounds.right)
+        const deltaY = Math.max(bounds.top - collisionY, 0, collisionY - bounds.bottom)
+        const distance = Math.hypot(deltaX, deltaY)
+        if (distance < nearestDistance) {
+          nearestDistance = distance
+          targetCard = card
+        }
+      })
+      if (nearestDistance > 48) targetCard = null
+    }
+    const targetTaskId = targetCard?.dataset.taskId || null
+    const targetTask = filteredTasks.find((task) => task.id === targetTaskId)
+    if (!targetCard || !targetTaskId || targetTaskId === drag.taskId || !draggedTask || !targetTask
+      || draggedTask.highlight || targetTask.highlight
+      || draggedTask.priority !== targetTask.priority || !!draggedTask.archived !== !!targetTask.archived) {
+      drag.targetTaskId = null
+      setDragOverTaskId((current) => current === null ? current : null)
+      return
+    }
+    const targetBounds = targetCard.getBoundingClientRect()
+    drag.targetTaskId = targetTaskId
+    const gridColumnCount = targetCard.parentElement
+      ? getComputedStyle(targetCard.parentElement).gridTemplateColumns.split(' ').filter(Boolean).length
+      : 1
+    if (viewMode === 'grid' && gridColumnCount > 1) {
+      drag.placeAfterTarget = collisionX >= targetBounds.left + targetBounds.width / 2
+    } else if (viewMode === 'list') {
+      const cardOrder = Array.from(document.querySelectorAll<HTMLElement>('[data-task-id]'))
+      drag.placeAfterTarget = cardOrder.indexOf(targetCard) > cardOrder.findIndex((card) => card.dataset.taskId === drag.taskId)
+    } else {
+      drag.placeAfterTarget = collisionY >= targetBounds.top + targetBounds.height / 2
+    }
+    setDragOverTaskId((current) => current === targetTaskId ? current : targetTaskId)
+  }
+
+  const handleManualPointerDown = (event: React.PointerEvent<HTMLDivElement>, taskId: string) => {
+    const taskCard = event.currentTarget.closest<HTMLElement>('[data-task-id]')
+    if (!taskCard) return
+    event.preventDefault()
+    event.stopPropagation()
+    startManualPointerDrag(event.pointerId, event.clientX, event.clientY, event.currentTarget, taskId, taskCard)
+  }
+
+  const handleManualPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerDragRef.current?.pointerId !== event.pointerId) return
+    event.preventDefault()
+    updateManualPointerDrag(event.pointerId, event.clientX, event.clientY)
+  }
+
+  const finishManualPointerDragById = async (pointerId: number, cancelled = false) => {
+    const drag = pointerDragRef.current
+    if (!drag || drag.pointerId !== pointerId) return
+    removeManualPointerListeners(drag)
+    drag.ghost.remove()
+    pointerDragRef.current = null
+    try {
+      if (drag.captureTarget.hasPointerCapture(pointerId)) drag.captureTarget.releasePointerCapture(pointerId)
+    } catch {
+      // The window-level lifecycle has already completed the drag safely.
+    }
+    if (cancelled || !drag.targetTaskId) {
+      clearManualDragState()
+      return
+    }
+    await applyManualOrder(drag.taskId, drag.targetTaskId, drag.placeAfterTarget)
+  }
+
+  const finishManualPointerDrag = (event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void finishManualPointerDragById(event.pointerId, cancelled)
+  }
+
+  useEffect(() => () => {
+    clearPendingTaskLongPress()
+    const drag = pointerDragRef.current
+    if (!drag) return
+    removeManualPointerListeners(drag)
+    drag.ghost.remove()
+    pointerDragRef.current = null
+  }, [])
+
+  const cancelTaskLongPress = (pointerId?: number) => {
+    const pending = taskLongPressRef.current
+    if (!pending || (pointerId !== undefined && pending.pointerId !== pointerId)) return
+    window.clearTimeout(pending.timer)
+    taskLongPressRef.current = null
+  }
+
+  const handleTaskPointerDown = (event: React.PointerEvent<HTMLDivElement>, taskId: string) => {
+    if (bulkSelectionMode || pointerDragRef.current) return
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="button"]')) return
+    const task = filteredTasks.find((candidate) => candidate.id === taskId)
+    if (!task || task.highlight || manualGroupSize(task) < 2) return
+
+    cancelTaskLongPress()
+    const taskCard = event.currentTarget
+    const pending = {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      taskId,
+      startX: event.clientX,
+      startY: event.clientY,
+      timer: 0,
+      activated: false,
+      taskCard,
+    }
+    if (event.pointerType === 'mouse') {
+      try {
+        taskCard.setPointerCapture(event.pointerId)
+      } catch {
+        // The direct drag handle and active-drag window listeners remain available.
+      }
+    }
+    if (event.pointerType !== 'mouse') {
+      pending.timer = window.setTimeout(() => {
+        if (taskLongPressRef.current !== pending) return
+        pending.activated = true
+        suppressTaskClickRef.current = true
+        setSort('manual')
+        setTaskViewState({ sort: 'manual' })
+        startManualPointerDrag(
+          pending.pointerId,
+          pending.startX,
+          pending.startY,
+          pending.taskCard,
+          pending.taskId,
+          pending.taskCard,
+        )
+      }, 500)
+    }
+    taskLongPressRef.current = pending
+  }
+
+  const handleTaskPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('.fc-manual-drag-handle')) return
+    const pending = taskLongPressRef.current
+    if (pending?.pointerId === event.pointerId && !pending.activated) {
+      const distance = Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY)
+      if (pending.pointerType === 'mouse' && distance >= 4) {
+        pending.activated = true
+        suppressTaskClickRef.current = true
+        window.getSelection()?.removeAllRanges()
+        setSort('manual')
+        setTaskViewState({ sort: 'manual' })
+        startManualPointerDrag(
+          pending.pointerId,
+          pending.startX,
+          pending.startY,
+          pending.taskCard,
+          pending.taskId,
+          pending.taskCard,
+        )
+        event.preventDefault()
+        event.stopPropagation()
+        updateManualPointerDrag(event.pointerId, event.clientX, event.clientY)
+      } else if (pending.pointerType !== 'mouse' && distance > 10) {
+        cancelTaskLongPress(event.pointerId)
+      }
+      return
+    }
+    if (pointerDragRef.current?.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    updateManualPointerDrag(event.pointerId, event.clientX, event.clientY)
+  }
+
+  const finishTaskPointerInteraction = (event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
+    if ((event.target as HTMLElement).closest('.fc-manual-drag-handle')) return
+    const wasActivated = taskLongPressRef.current?.pointerId === event.pointerId
+      && taskLongPressRef.current.activated
+    cancelTaskLongPress(event.pointerId)
+    if (pointerDragRef.current?.pointerId !== event.pointerId) return
+    if (wasActivated) {
+      suppressTaskClickRef.current = true
+      window.setTimeout(() => { suppressTaskClickRef.current = false }, 500)
+    }
+    void finishManualPointerDrag(event, cancelled)
+  }
+
+  const handleTaskClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!suppressTaskClickRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    suppressTaskClickRef.current = false
+  }
 
   if (initError) {
     return (
@@ -1301,6 +1803,7 @@ export default function DashboardPage() {
                 className="input text-xs fc-control fc-select-control fc-filter-select fc-filter-select-sort shrink-0"
                 style={{ width: 164, minWidth: 164 }}
               >
+                <option value="manual">Sort: Manual</option>
                 <option value="priority">Sort: Priority</option>
                 <option value="dueDate">Sort: Due</option>
                 <option value="createdAt">Sort: Newest</option>
@@ -1373,6 +1876,11 @@ export default function DashboardPage() {
               </button>
             </div>
           ) : null}
+          {manualSortError ? (
+            <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300" role="alert">
+              Manual order was not saved: {manualSortError}
+            </div>
+          ) : null}
           {showBlockingLoader ? (
             <div className="fc-task-loading-skeleton" aria-hidden="true">
               {Array.from({ length: 6 }).map((_, index) => (
@@ -1415,10 +1923,18 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={task.id}
+                    data-task-id={task.id}
+                    onPointerDown={(event) => handleTaskPointerDown(event, task.id)}
+                    onPointerMove={handleTaskPointerMove}
+                    onPointerUp={finishTaskPointerInteraction}
+                    onPointerCancel={(event) => finishTaskPointerInteraction(event, true)}
+                    onClickCapture={handleTaskClickCapture}
+                    onContextMenu={(event) => { if (taskLongPressRef.current) event.preventDefault() }}
                     onClick={() => bulkSelectionMode ? toggleTaskSelection(task.id) : openTaskPanel(task)}
-                    className={`card card-hover p-4 min-h-[150px] flex flex-col gap-3 cursor-pointer transition-opacity ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''}`}
+                    className={`fc-task-long-press card card-hover relative p-4 min-h-[150px] flex flex-col gap-3 cursor-pointer transition-all ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''} ${dragOverTaskId === task.id ? 'ring-2 ring-[var(--accent)]' : ''} ${draggedTaskId === task.id ? 'opacity-50' : ''}`}
                     style={{ borderLeft: `4px solid ${isCompleted ? 'rgba(113,113,122,0.75)' : priority.color}` }}
                   >
+                    <HighlightStar highlighted={task.highlight} />
                     <div className="flex items-start justify-between gap-3">
                       {bulkSelectionMode ? (
                         <div
@@ -1428,16 +1944,20 @@ export default function DashboardPage() {
                         >
                           {isSelected ? <Check className="h-3 w-3 text-white" /> : null}
                         </div>
-                      ) : isCompleted ? (
-                        <div className="w-5 h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Check className="w-3 h-3 text-zinc-500" />
-                        </div>
                       ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id) }}
-                          className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 flex-shrink-0 transition-colors"
-                          title="Mark complete"
-                        />
+                        <div className="flex shrink-0 items-center">
+                          {isCompleted ? (
+                            <div className="w-5 h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <Check className="w-3 h-3 text-zinc-500" />
+                            </div>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 flex-shrink-0 transition-colors"
+                              title="Mark complete"
+                            />
+                          )}
+                        </div>
                       )}
                       <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
                         {statusHydrated && !isCompleted && inProgressStatusId && task.statusId === inProgressStatusId ? (
@@ -1460,6 +1980,16 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
+                      {!task.highlight ? (
+                        <ManualDragHandle
+                          task={task}
+                          disabled={manualGroupSize(task) < 2}
+                          onPointerDown={handleManualPointerDown}
+                          onPointerMove={handleManualPointerMove}
+                          onPointerUp={(event) => void finishManualPointerDrag(event)}
+                          onPointerCancel={(event) => void finishManualPointerDrag(event, true)}
+                        />
+                      ) : null}
                       <span className={`badge ${priority.badge} fc-task-priority-pill text-xs`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
                         <PriorityIcon className="w-3 h-3" />
                         {priority.label}
@@ -1499,10 +2029,18 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={task.id}
+                    data-task-id={task.id}
+                    onPointerDown={(event) => handleTaskPointerDown(event, task.id)}
+                    onPointerMove={handleTaskPointerMove}
+                    onPointerUp={finishTaskPointerInteraction}
+                    onPointerCancel={(event) => finishTaskPointerInteraction(event, true)}
+                    onClickCapture={handleTaskClickCapture}
+                    onContextMenu={(event) => { if (taskLongPressRef.current) event.preventDefault() }}
                     onClick={() => bulkSelectionMode ? toggleTaskSelection(task.id) : openTaskPanel(task)}
-                    className={`card card-hover p-3 sm:p-4 cursor-pointer transition-opacity ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''}`}
+                    className={`fc-task-long-press card card-hover relative p-3 sm:p-4 cursor-pointer transition-all ${isCompleted ? 'opacity-70 bg-[var(--bg-secondary)]' : ''} ${dragOverTaskId === task.id ? 'ring-2 ring-[var(--accent)]' : ''} ${draggedTaskId === task.id ? 'opacity-50' : ''}`}
                     style={{ borderLeft: `4px solid ${isCompleted ? 'rgba(113,113,122,0.75)' : priority.color}` }}
                   >
+                    <HighlightStar highlighted={task.highlight} />
                     <div className="flex items-start gap-3">
                       {bulkSelectionMode ? (
                         <div
@@ -1512,16 +2050,20 @@ export default function DashboardPage() {
                         >
                           {isSelected ? <Check className="h-3 w-3 text-white" /> : null}
                         </div>
-                      ) : isCompleted ? (
-                        <div className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Check className="w-3 h-3 text-zinc-500" />
-                        </div>
                       ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id) }}
-                          className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 flex-shrink-0 mt-0.5 transition-colors"
-                          title="Mark complete"
-                        />
+                        <div className="flex shrink-0 items-center">
+                          {isCompleted ? (
+                            <div className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 bg-zinc-700/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <Check className="w-3 h-3 text-zinc-500" />
+                            </div>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCompleteTask(task.id) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 rounded-full border-2 border-zinc-600 hover:border-[var(--accent)] hover:bg-[var(--accent)]/10 flex-shrink-0 mt-0.5 transition-colors"
+                              title="Mark complete"
+                            />
+                          )}
+                        </div>
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
@@ -1542,7 +2084,18 @@ export default function DashboardPage() {
                             <ChevronRight className="hidden sm:block w-4 h-4 text-zinc-600 flex-shrink-0" />
                           </div>
                         </div>
-                        <div className="fc-task-meta-row mt-2">
+                        <div className="fc-task-meta-row mt-[18px] sm:mt-2">
+                          {!task.highlight ? (
+                            <ManualDragHandle
+                              task={task}
+                              disabled={manualGroupSize(task) < 2}
+                              onPointerDown={handleManualPointerDown}
+                              onPointerMove={handleManualPointerMove}
+                              onPointerUp={(event) => void finishManualPointerDrag(event)}
+                              onPointerCancel={(event) => void finishManualPointerDrag(event, true)}
+                              className="fc-list-manual-drag-handle"
+                            />
+                          ) : null}
                           <span className={`badge ${priority.badge} fc-task-priority-pill text-xs`} style={{ background: priority.bgColor, color: priority.color, borderColor: priority.borderColor }}>
                             <PriorityIcon className="w-3 h-3" />
                             {priority.label}
@@ -1583,6 +2136,7 @@ export default function DashboardPage() {
           editTitle={editTitle}
           editDescription={editDescription}
           editPriority={editPriority}
+          editHighlight={editHighlight}
           editDueDate={editDueDate}
           editAssignee={editAssignee}
           editProjectId={editProjectId}
@@ -1606,6 +2160,7 @@ export default function DashboardPage() {
           setEditTitle={setEditTitle}
           setEditDescription={setEditDescription}
           setEditPriority={setEditPriority}
+          setEditHighlight={setEditHighlight}
           setEditDueDate={setEditDueDate}
           setEditAssignee={setEditAssignee}
           setEditProjectId={setEditProjectId}

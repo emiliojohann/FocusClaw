@@ -29,7 +29,7 @@ type SearchableTask = {
 }
 
 type TaskListQuery = {
-  sort?: 'priority' | 'dueDate' | 'createdAt'
+  sort?: 'manual' | 'priority' | 'dueDate' | 'createdAt'
   order?: 'asc' | 'desc'
   filter?: 'all' | 'dueToday' | 'dueTomorrow' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
   includeArchived?: string
@@ -268,6 +268,23 @@ function taskDueDateKey(dueDate: Date | string | null): string | null {
   return isUtcMidnight ? date.toISOString().slice(0, 10) : localDateKey(date)
 }
 
+async function rotateHighlightsToToday(projectIds: string[]): Promise<void> {
+  if (projectIds.length === 0) return
+  const highlighted = await db.select().from(tasks).where(and(
+    inArray(tasks.projectId, projectIds),
+    eq(tasks.highlight, true),
+    eq(tasks.archived, false),
+  ))
+  const todayKey = localDateKey()
+  const staleIds = highlighted
+    .filter((task) => taskDueDateKey(task.dueDate) !== todayKey)
+    .map((task) => task.id)
+  if (staleIds.length === 0) return
+  await db.update(tasks)
+    .set({ dueDate: parseDueDateInput(todayKey), updatedAt: new Date() })
+    .where(inArray(tasks.id, staleIds))
+}
+
 function readActivityChanges(raw: string | null): Record<string, unknown> {
   if (!raw) return {}
   try {
@@ -448,12 +465,15 @@ export async function taskRoutes(fastify: FastifyInstance) {
         .limit(1)
       position = siblings.length > 0 ? siblings[0].maxPos + 1 : 0
     } else {
-      const rootTasks = await db.select({ maxPos: tasks.position })
-        .from(tasks)
-        .where(and(eq(tasks.projectId, projectId), isNull(tasks.parentId)))
-        .orderBy(desc(tasks.position))
-        .limit(1)
-      position = rootTasks.length > 0 ? rootTasks[0].maxPos + 1 : 0
+      const rootTaskPosition = sqlite.prepare(`
+        SELECT COALESCE(MAX(task.position), -1) AS max_pos
+        FROM tasks task
+        JOIN projects task_project ON task_project.id = task.project_id
+        WHERE task_project.workspace_id = (
+          SELECT workspace_id FROM projects WHERE id = ?
+        ) AND task.parent_id IS NULL
+      `).get(projectId) as { max_pos: number }
+      position = rootTaskPosition.max_pos + 1
     }
 
     // ── Dependencies ────────────────────────────────────────────────────────
@@ -501,13 +521,19 @@ export async function taskRoutes(fastify: FastifyInstance) {
   async function listTasksForProjects(projectIds: string[], projectNameById: Map<string, string>, query: TaskListQuery) {
     if (projectIds.length === 0) return []
 
+    await rotateHighlightsToToday(projectIds)
+
     const { sort, order, filter, includeArchived, q } = query
     const sortField = sort === 'dueDate' ? tasks.dueDate : sort === 'createdAt' ? tasks.createdAt : tasks.priority
     const sortDirection = order === 'desc' ? desc(sortField) : asc(sortField)
 
     const allProjectTasks = await db.select().from(tasks)
       .where(inArray(tasks.projectId, projectIds))
-      .orderBy(asc(tasks.projectId), asc(tasks.archived), sortDirection)
+      .orderBy(
+        asc(tasks.archived),
+        desc(tasks.highlight),
+        ...(sort === 'manual' ? [asc(tasks.priority), asc(tasks.position)] : [asc(tasks.projectId), sortDirection]),
+      )
     let result = allProjectTasks
     const hydratedProjectTasks = hydrateTasksWithTags(allProjectTasks)
     const hydratedTaskById = new Map(hydratedProjectTasks.map((task) => [task.id, task]))
@@ -623,7 +649,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
   fastify.get('/project/:projectId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { projectId } = request.params as { projectId: string }
     const { sort, order, filter, includeArchived, q } = request.query as {
-      sort?: 'priority' | 'dueDate' | 'createdAt'
+      sort?: 'manual' | 'priority' | 'dueDate' | 'createdAt'
       order?: 'asc' | 'desc'
       filter?: 'all' | 'dueToday' | 'dueTomorrow' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
       includeArchived?: string
@@ -641,13 +667,19 @@ export async function taskRoutes(fastify: FastifyInstance) {
       return reply.send([])
     }
 
-    // Open tasks always stay above completed tasks; selected sort applies within each group.
+    await rotateHighlightsToToday([projectId])
+
+    // Open tasks stay above completed tasks, with the Highlight first; selected sort applies within each group.
     const sortField = sort === 'dueDate' ? tasks.dueDate : sort === 'createdAt' ? tasks.createdAt : tasks.priority
     const sortDirection = order === 'desc' ? desc(sortField) : asc(sortField)
 
     const allProjectTasks = await db.select().from(tasks)
       .where(eq(tasks.projectId, projectId))
-      .orderBy(asc(tasks.archived), sortDirection)
+      .orderBy(
+        asc(tasks.archived),
+        desc(tasks.highlight),
+        ...(sort === 'manual' ? [asc(tasks.priority), asc(tasks.position)] : [sortDirection]),
+      )
     let result = allProjectTasks
     const hydratedProjectTasks = hydrateTasksWithTags(allProjectTasks)
     const hydratedTaskById = new Map(hydratedProjectTasks.map((task) => [task.id, task]))
@@ -919,10 +951,17 @@ export async function taskRoutes(fastify: FastifyInstance) {
   fastify.get('/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string }
 
-    const result = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
+    let result = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
 
     if (result.length === 0) {
       return reply.status(404).send({ error: 'Task not found' })
+    }
+
+    if (result[0].highlight && !result[0].archived && taskDueDateKey(result[0].dueDate) !== localDateKey()) {
+      await db.update(tasks)
+        .set({ dueDate: parseDueDateInput(localDateKey()), updatedAt: new Date() })
+        .where(eq(tasks.id, id))
+      result = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
     }
 
     const [task] = await addAttachmentCounts(addSubtaskCounts([hydrateTaskWithTags(result[0])], result))
@@ -945,6 +984,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       projectId: string
       recurring: string | null
       recurringEnd: string | null
+      highlight: boolean
     }>
     const existingTask = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1)
     if (existingTask.length === 0) {
@@ -971,6 +1011,28 @@ export async function taskRoutes(fastify: FastifyInstance) {
     }
     if (updates.recurringEnd !== undefined) {
       setObj.recurringEnd = updates.recurringEnd ? new Date(updates.recurringEnd) : null
+    }
+    const willBeArchived = updates.archived ?? existingTask[0].archived
+    const willBeHighlight = !willBeArchived && (updates.highlight ?? existingTask[0].highlight)
+    if (willBeHighlight && existingTask[0].parentId) {
+      return reply.status(400).send({ error: 'Only top-level tasks can be highlighted' })
+    }
+    if (willBeHighlight) {
+      const targetProjectId = updates.projectId ?? existingTask[0].projectId
+      const targetProject = await db.select().from(projects).where(eq(projects.id, targetProjectId)).limit(1)
+      if (targetProject.length === 0) return reply.status(400).send({ error: 'Project not found' })
+      const workspaceProjects = await db.select({ id: projects.id }).from(projects)
+        .where(eq(projects.workspaceId, targetProject[0].workspaceId))
+      const workspaceProjectIds = workspaceProjects.map((project) => project.id)
+      if (workspaceProjectIds.length > 0) {
+        await db.update(tasks)
+          .set({ highlight: false, updatedAt: new Date() })
+          .where(and(inArray(tasks.projectId, workspaceProjectIds), eq(tasks.highlight, true)))
+      }
+      setObj.highlight = true
+      setObj.dueDate = parseDueDateInput(localDateKey())
+    } else if (willBeArchived || updates.highlight === false) {
+      setObj.highlight = false
     }
     setObj.updatedAt = new Date()
 
@@ -1087,18 +1149,71 @@ export async function taskRoutes(fastify: FastifyInstance) {
     return reply.status(204).send()
   })
 
-  // Reorder tasks within a project
+  // Reorder a visible subset of root tasks within one workspace.
   fastify.post('/reorder', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { projectId, taskIds } = request.body as { projectId: string; taskIds: string[] }
+    const { taskIds } = request.body as { projectId?: string; taskIds?: string[] }
+    if (!Array.isArray(taskIds) || taskIds.length < 2 || taskIds.length > 2000) {
+      return reply.status(400).send({ error: 'taskIds must contain 2-2000 tasks' })
+    }
 
-    // Update positions in batch
-    await Promise.all(taskIds.map((taskId, index) =>
-      db.update(tasks)
-        .set({ position: index, updatedAt: new Date() })
-        .where(eq(tasks.id, taskId))
-    ))
+    const orderedIds = [...new Set(taskIds)]
+    if (orderedIds.length !== taskIds.length || orderedIds.some((id) => !isValidUUID(id))) {
+      return reply.status(400).send({ error: 'taskIds must contain unique valid task IDs' })
+    }
 
-    return reply.send({ success: true })
+    const placeholders = orderedIds.map(() => '?').join(', ')
+    const selectedRows = sqlite.prepare(`
+      SELECT task.id, task.parent_id, task.priority, task.archived, project.workspace_id
+      FROM tasks task
+      JOIN projects project ON project.id = task.project_id
+      WHERE task.id IN (${placeholders})
+    `).all(...orderedIds) as Array<{ id: string; parent_id: string | null; priority: number; archived: number; workspace_id: string }>
+
+    if (selectedRows.length !== orderedIds.length || selectedRows.some((task) => task.parent_id !== null)) {
+      return reply.status(400).send({ error: 'Manual ordering supports root tasks only' })
+    }
+
+    const workspaceIds = new Set(selectedRows.map((task) => task.workspace_id))
+    if (workspaceIds.size !== 1) {
+      return reply.status(400).send({ error: 'Tasks must belong to one workspace' })
+    }
+
+    const priorityGroups = new Set(selectedRows.map((task) => `${task.archived}:${task.priority}`))
+    if (priorityGroups.size !== 1) {
+      return reply.status(400).send({ error: 'Manual ordering works within one priority group' })
+    }
+
+    const workspaceId = selectedRows[0].workspace_id
+    const priority = selectedRows[0].priority
+    const archived = selectedRows[0].archived
+    const workspaceTasks = sqlite.prepare(`
+      SELECT task.id
+      FROM tasks task
+      JOIN projects project ON project.id = task.project_id
+      WHERE project.workspace_id = ?
+        AND task.parent_id IS NULL
+        AND task.priority = ?
+        AND task.archived = ?
+      ORDER BY task.position ASC, task.created_at ASC, task.id ASC
+    `).all(workspaceId, priority, archived) as Array<{ id: string }>
+
+    const selectedSet = new Set(orderedIds)
+    const selectedSlots = workspaceTasks
+      .map((task, index) => selectedSet.has(task.id) ? index : -1)
+      .filter((index) => index >= 0)
+    if (selectedSlots.length !== orderedIds.length) {
+      return reply.status(409).send({ error: 'Task order changed; refresh and try again' })
+    }
+
+    const normalizedOrder = workspaceTasks.map((task) => task.id)
+    selectedSlots.forEach((slot, index) => { normalizedOrder[slot] = orderedIds[index] })
+    const updatePosition = sqlite.prepare('UPDATE tasks SET position = ?, updated_at = unixepoch() WHERE id = ?')
+    const persistOrder = sqlite.transaction(() => {
+      normalizedOrder.forEach((taskId, index) => updatePosition.run(index, taskId))
+    })
+    persistOrder()
+
+    return reply.send({ success: true, reorderedCount: orderedIds.length })
   })
 
   // Status definitions
@@ -1265,7 +1380,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
 
     // Archive the current instance
     await db.update(tasks)
-      .set({ archived: true, updatedAt: new Date() })
+      .set({ archived: true, highlight: false, updatedAt: new Date() })
       .where(eq(tasks.id, id))
 
     // Log completion
@@ -1309,7 +1424,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
     return `"${raw.replace(/"/g, '""')}"`
   }
 
-  const csvHeaders = ['id', 'project', 'title', 'description', 'priority', 'due_date', 'assignee', 'tags', 'status', 'created_at', 'updated_at']
+  const csvHeaders = ['id', 'project', 'title', 'description', 'priority', 'due_date', 'highlight', 'assignee', 'tags', 'status', 'created_at', 'updated_at']
 
   const buildTasksCsv = (taskRows: Array<any>, projectNameById: Map<string, string>) => {
     const rows = taskRows.map((t: any) => [
@@ -1319,6 +1434,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
       csvEscape(t.description || ''),
       csvEscape(priorityLabels[t.priority] || 'Unknown'),
       t.dueDate ? csvEscape(new Date(t.dueDate).toISOString().split('T')[0]) : '',
+      csvEscape(t.highlight ? 'yes' : 'no'),
       csvEscape(t.assignee || ''),
       csvEscape(Array.isArray(t.tags) ? t.tags.map((tag: any) => tag.name).join('; ') : ''),
       csvEscape(t.archived ? 'completed' : 'active'),

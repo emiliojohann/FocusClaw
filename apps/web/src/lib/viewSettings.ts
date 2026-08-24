@@ -1,4 +1,4 @@
-export type TaskSort = 'priority' | 'dueDate' | 'createdAt'
+export type TaskSort = 'manual' | 'priority' | 'dueDate' | 'createdAt'
 export type TaskFilter = 'all' | 'dueToday' | 'dueTomorrow' | 'dueThisWeek' | 'dueNextWeek' | 'pastDue' | 'noDate' | 'archived'
 export type TaskViewMode = 'list' | 'grid'
 export type CalendarViewMode = 'month' | 'week'

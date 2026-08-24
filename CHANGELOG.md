@@ -1,5 +1,27 @@
 # Changelog
 
+## v2026.08.24 - 2026-08-24
+
+- Added a single daily Highlight task that stays pinned above all other active tasks and automatically advances to the current date without creating duplicates.
+- Added a "Pin as Highlight" setting with database enforcement so assigning a new Highlight replaces the previous one.
+- Added a yellow star treatment on task cards and a compact yellow corner marker on Calendar cards, with refined sizing across desktop and mobile layouts.
+- Prevented highlighted tasks from being dragged or used as reorder targets while leaving normal task reordering unchanged.
+- Preserved Highlight state in agent/plugin updates, backups, and CSV exports, and cleared it when the task is completed or archived.
+- Improved Highlight readability and alignment across light and dark themes.
+- Added priority-aware manual task ordering in list and grid views.
+- Made the drag handle available without first selecting Manual sort; a successful reorder switches the dashboard to **Sort: Manual** automatically.
+- Aligned the list-view grabber with the priority/project/due metadata row.
+- Made the whole task card follow the pointer while dragging on desktop and mobile touch devices.
+- Added a 0.5-second mobile long press anywhere on a task to enter Manual sort and begin a full-card drag, while preserving normal taps and scrolling.
+- Added extra mobile spacing between task titles and the metadata pill row.
+- Replaced native desktop drag-and-drop with FocusClaw's captured-pointer drag so every grab stays active through release.
+- Added a window-level pointer fallback so fast list/grid drags still finish when browser pointer capture is unavailable or lost, resolve the drop from the final release coordinates, reset drag state safely across view changes, and move the preview on GPU-accelerated transforms for smoother tracking.
+- Kept manual dragging available while prior reorder saves finish, with background saves serialized in gesture order so repeated list/grid switches cannot leave every handle locked.
+- Made desktop whole-card drags activate after 4px of movement, captured the pointer from mouse-down so one-step fast gestures cannot outrun activation, and snap releases in card gaps to the nearest valid same-priority target.
+- Made list-mode collision follow the dragged card body and its leading edge instead of the cursor alone, so vertical rows snap substantially earlier in both directions.
+- Persisted manual order across refreshes and project filters.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.24` / `v2026.08.24`.
+
 ## v2026.08.11 - 2026-08-11
 
 - Added a To Do / In Progress / Done lifecycle control to Task Details while keeping Done routed through the recurring-safe completion endpoint.

@@ -1,7 +1,7 @@
 import {
   Check, CalendarDays, X, Bot, User, Plus,
   MessageSquare, Send, BarChart3, Trash2, Pencil, Save,
-  Paperclip, ExternalLink, FileText, Image, Folder, File, AlertTriangle
+  Paperclip, ExternalLink, FileText, Image, Folder, File, AlertTriangle, Star
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { DatePicker } from './DatePicker'
@@ -49,7 +49,7 @@ interface AttachmentEntry {
 
 const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: string; bgColor: string; borderColor: string; activeTextColor: string }> = {
   1: { label: 'Critical', badge: 'badge-critical', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.2)', activeTextColor: '#ffffff' },
-  2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.2)', activeTextColor: '#18181b' },
+  2: { label: 'High', badge: 'badge-high', color: '#f97316', bgColor: 'rgba(249,115,22,0.15)', borderColor: 'rgba(249,115,22,0.2)', activeTextColor: 'var(--priority-high-active-text)' },
   3: { label: 'Medium', badge: 'badge-medium', color: 'var(--priority-medium)', bgColor: 'var(--priority-medium-bg)', borderColor: 'var(--priority-medium-border)', activeTextColor: 'var(--priority-medium-active-text)' },
   4: { label: 'Low', badge: 'badge-low', color: '#71717a', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', activeTextColor: '#ffffff' },
 }
@@ -62,6 +62,7 @@ interface TaskPanelProps {
   editTitle: string
   editDescription: string
   editPriority: number
+  editHighlight: boolean
   editDueDate: string
   editAssignee: string
   editProjectId: string
@@ -89,6 +90,7 @@ interface TaskPanelProps {
   setEditTitle: (v: string) => void
   setEditDescription: (v: string) => void
   setEditPriority: (v: number) => void
+  setEditHighlight: (v: boolean) => void
   setEditDueDate: (v: string) => void
   setEditAssignee: (v: string) => void
   setEditProjectId: (v: string) => void
@@ -203,6 +205,7 @@ export function TaskPanel({
   editTitle,
   editDescription,
   editPriority,
+  editHighlight,
   editDueDate,
   editAssignee,
   editProjectId,
@@ -226,6 +229,7 @@ export function TaskPanel({
   setEditTitle,
   setEditDescription,
   setEditPriority,
+  setEditHighlight,
   setEditDueDate,
   setEditAssignee,
   setEditProjectId,
@@ -279,6 +283,7 @@ export function TaskPanel({
     editTitle !== (selectedTask.title || '') ||
     editDescription !== (selectedTask.description || '') ||
     editPriority !== selectedTask.priority ||
+    editHighlight !== !!selectedTask.highlight ||
     editDueDate !== selectedDueDate ||
     normalizeAssignee(editAssignee) !== normalizeAssignee(selectedTask.assignee) ||
     editProjectId !== (selectedTask.projectId || projectId) ||
@@ -532,6 +537,22 @@ export function TaskPanel({
                       <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Highlight</label>
+                  <button
+                    type="button"
+                    onClick={() => setEditHighlight(!editHighlight)}
+                    aria-pressed={editHighlight}
+                    className={`flex h-10 w-full items-center justify-between rounded-xl border px-3 text-xs font-medium transition-all ${editHighlight ? 'fc-highlight-toggle-active' : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Star className="h-4 w-4" fill={editHighlight ? 'currentColor' : 'none'} />
+                      Pin as Highlight
+                    </span>
+                    <span>{editHighlight ? 'On' : 'Off'}</span>
+                  </button>
+                  <p className="mt-1.5 text-[11px] text-[var(--text-muted)]">Only one task can be highlighted. It advances to the current day automatically.</p>
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 block">Priority</label>
