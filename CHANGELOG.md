@@ -1,5 +1,10 @@
 # Changelog
 
+## v2026.08.24.1 - 2026-08-28
+
+- Declared all ten registered FocusClaw agent tools in the plugin manifest's `contracts.tools` list so OpenClaw 2026.7 and newer can load and expose them.
+- Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.24-1` / `v2026.08.24.1`.
+
 ## v2026.08.24 - 2026-08-24
 
 - Added a single daily Highlight task that stays pinned above all other active tasks and automatically advances to the current date without creating duplicates.
