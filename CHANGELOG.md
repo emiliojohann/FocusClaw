@@ -2,6 +2,10 @@
 
 ## v2026.08.24.1 - 2026-08-28
 
+### Thanks
+
+Special thanks to [@Minoo7](https://github.com/Minoo7) for identifying and fixing the OpenClaw plugin compatibility issue in [PR #3](https://github.com/emiliojohann/FocusClaw/pull/3).
+
 - Declared all ten registered FocusClaw agent tools in the plugin manifest's `contracts.tools` list so OpenClaw 2026.7 and newer can load and expose them.
 - Updated app, API, plugin, landing, package, and backup version metadata to `2026.8.24-1` / `v2026.08.24.1`.
 
