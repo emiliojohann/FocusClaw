@@ -25,5 +25,19 @@
         "description": "Default project ID for task operations"
       }
     }
+  },
+  "contracts": {
+    "tools": [
+      "focusclaw_plain_text_command",
+      "focusclaw_list_open_tasks",
+      "focusclaw_list_due_tasks",
+      "focusclaw_find_task",
+      "focusclaw_create_task",
+      "focusclaw_list_tasks",
+      "focusclaw_get_task",
+      "focusclaw_update_task",
+      "focusclaw_complete_task",
+      "focusclaw_delete_task"
+    ]
   }
 }
