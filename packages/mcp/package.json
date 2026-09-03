@@ -1,0 +1,33 @@
+{
+  "name": "@focusclaw/mcp",
+  "version": "2026.9.1-1",
+  "private": true,
+  "type": "module",
+  "description": "Portable MCP server for the FocusClaw local task API",
+  "bin": {
+    "focusclaw-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/server.js",
+    "dist/server.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test dist/server.test.js"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3"
+  },
+  "license": "MIT"
+}

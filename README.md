@@ -1,8 +1,8 @@
 # FocusClaw
 
-Task context for OpenClaw, Hermes, and humans.
+Task context for OpenClaw, Grok Build, Hermes, and humans.
 
-FocusClaw is a local-first task app and REST API backed by SQLite. It gives humans a fast web interface while giving OpenClaw and Hermes a structured task source of truth they can read, update, and coordinate through.
+FocusClaw is a local-first task app and REST API backed by SQLite. It gives humans a fast web interface while giving connected agents a structured task source of truth they can read, update, and coordinate through.
 
 ## Why FocusClaw Exists
 
@@ -14,7 +14,7 @@ FocusClaw is built around a shared task model:
 
 - Projects, tasks, subtasks, comments, tags, due dates, priorities, and owner labels
 - A web app for normal human task management
-- OpenClaw plugin tools plus a REST API for Hermes, scripts, and any HTTP-capable agent stack
+- OpenClaw plugin tools, a portable MCP server, and a REST API for other agent stacks
 - Local SQLite storage with snapshots and encrypted exports
 
 Owner labels such as `user`, `agent`, and `unassigned` are coordination labels only. They do not trigger background execution, scheduled runs, permissions, or autonomous workflows.
@@ -28,7 +28,7 @@ FocusClaw is in early development. The self-hosted app is usable locally, and th
 - Frontend: React 19, Vite, Tailwind CSS
 - Backend: Fastify, SQLite, Drizzle ORM
 - Storage: local SQLite database at `data/focusclaw.db`
-- Agent access: OpenClaw plugin tools first, Hermes and other agent platforms through the local REST API
+- Agent access: OpenClaw plugin tools, a portable stdio MCP server, and the local REST API
 - Deployment: local-first self-hosting, optional private Tailscale access
 
 ## Quick Start
@@ -53,6 +53,8 @@ The default local URLs are:
 `./start.sh` creates the local `data/` directory and points the API at `data/focusclaw.db`.
 
 FocusClaw includes a local Agent Automation API for trusted agents and scripts. It lets OpenClaw, Hermes, and other local tools read projects, create tasks, update work, and mark tasks complete without controlling the browser UI. See [Agent Automation API](./docs/agent-automation-api.md) for the technical contract. For Hermes-specific setup guidance, see [Hermes Integration](./docs/hermes-integration.md).
+
+For Grok Build and other MCP clients, see [MCP Integration](./docs/mcp-integration.md). The MCP server is bundled in `packages/mcp` and connects to the same local REST API; it does not read SQLite directly or open another network port.
 
 ## Common Workflows
 
@@ -244,6 +246,7 @@ apps/api       Fastify API server
 apps/web       React web app
 apps/landing   Landing page package
 packages/plugin OpenClaw plugin package
+packages/mcp   Portable stdio MCP server
 docs/          Agent API and Hermes integration docs
 data/          Local SQLite database directory
 ```

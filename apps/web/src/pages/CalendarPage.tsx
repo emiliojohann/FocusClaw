@@ -487,6 +487,8 @@ export default function CalendarPage() {
   }
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null)
+  const [deletingTask, setDeletingTask] = useState(false)
   const [panelLoading, setPanelLoading] = useState(false)
   const [lifecycleChanging, setLifecycleChanging] = useState(false)
   const [editTitle, setEditTitle] = useState('')
@@ -1061,13 +1063,15 @@ export default function CalendarPage() {
   }
 
   const handleDeleteTask = async () => {
-    if (!selectedTask) return
-    if (!confirm(`Delete "${selectedTask.title}"? This cannot be undone.`)) return
+    if (!taskPendingDelete || deletingTask) return
+    setDeletingTask(true)
     try {
-      await taskApi.delete(selectedTask.id)
+      await taskApi.delete(taskPendingDelete.id)
+      setTaskPendingDelete(null)
       setSelectedTask(null)
       await loadTasks()
     } catch (err) { console.error(err) }
+    finally { setDeletingTask(false) }
   }
 
   const isTodayDate = (dateKey: string): boolean => dateKey === localDateKey(new Date())
@@ -1461,7 +1465,7 @@ export default function CalendarPage() {
           onSave={handleSaveTask}
           onLifecycleChange={handleLifecycleChange}
           onReopen={handleReopenTask}
-          onDelete={handleDeleteTask}
+          onDelete={() => selectedTask && setTaskPendingDelete(selectedTask)}
           onAddSubtask={handleAddSubtask}
           onUpdateSubtask={handleUpdateSubtask}
           onDeleteSubtask={handleDeleteSubtask}
@@ -1479,6 +1483,58 @@ export default function CalendarPage() {
           showDelete={true}
         />
       )}
+
+      {taskPendingDelete ? (
+        <>
+          <div
+            className="fixed inset-0 z-[240] bg-black/70 backdrop"
+            onClick={() => !deletingTask && setTaskPendingDelete(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-delete-task-title"
+            className="fixed left-1/2 top-1/2 z-[250] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+              <h3 id="calendar-delete-task-title" className="text-sm font-semibold text-white">Delete Task</h3>
+              <button
+                type="button"
+                onClick={() => setTaskPendingDelete(null)}
+                className="btn btn-ghost p-1.5"
+                aria-label="Cancel task deletion"
+                disabled={deletingTask}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <p className="text-sm leading-5 text-zinc-400">
+                Delete <span className="break-words font-medium text-white">{taskPendingDelete.title}</span>?
+              </p>
+              <p className="mt-2 text-xs leading-5 text-zinc-500">This removes the task, its subtasks, and comments.</p>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTaskPendingDelete(null)}
+                  className="btn btn-secondary w-full text-xs"
+                  disabled={deletingTask}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteTask}
+                  className="btn w-full bg-red-500/15 text-xs text-red-300"
+                  disabled={deletingTask}
+                >
+                  {deletingTask ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {showNewTaskForm && (
         <>

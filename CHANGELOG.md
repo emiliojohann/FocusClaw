@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.09.01.1 - 2026-09-02
+
+- Added a portable MCP server package for connecting FocusClaw to MCP-compatible AI clients, with guarded configuration, sanitized errors, tool coverage, setup documentation, and a read-only smoke test.
+- Replaced Calendar task deletion's native browser confirmation with the same branded in-app confirmation dialog used by the Tasks dashboard.
+- Upgraded Fastify to `5.12.1` and pinned the transitive `fast-uri` and `qs` dependencies to patched releases, resolving the latest Fastify validation/proxy, URI normalization/SSRF, and query-string denial-of-service advisories and restoring a zero-vulnerability dependency audit.
+- Updated app, API, plugin, landing, MCP, package, and backup version metadata to `2026.9.1-1` / `v2026.09.01.1`.
+
 ## v2026.08.24.1 - 2026-08-28
 
 ### Thanks
