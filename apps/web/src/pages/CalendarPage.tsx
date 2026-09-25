@@ -966,6 +966,18 @@ export default function CalendarPage() {
     }
   }
 
+  const handleReorderSubtasks = async (subtaskIds: string[]) => {
+    if (!selectedTask) return
+    const byId = new Map(subtasks.map((subtask) => [subtask.id, subtask]))
+    setSubtasks(subtaskIds.map((id, position) => ({ ...byId.get(id)!, position })))
+    try {
+      await taskApi.reorderSubtasks(selectedTask.id, subtaskIds)
+    } catch (error) {
+      setSubtasks(await taskApi.getSubtasks(selectedTask.id))
+      throw error
+    }
+  }
+
   const handleDeleteSubtask = async (subtaskId: string) => {
     const deletingSubtask = subtasks.find((st) => st.id === subtaskId)
     try {
@@ -1468,6 +1480,7 @@ export default function CalendarPage() {
           onDelete={() => selectedTask && setTaskPendingDelete(selectedTask)}
           onAddSubtask={handleAddSubtask}
           onUpdateSubtask={handleUpdateSubtask}
+          onReorderSubtasks={handleReorderSubtasks}
           onDeleteSubtask={handleDeleteSubtask}
           onAddComment={handleAddComment}
           onAddAttachment={handleAddAttachment}

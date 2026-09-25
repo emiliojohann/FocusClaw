@@ -111,7 +111,7 @@ export function createFocusClawServer(config: FocusClawConfig): McpServer {
   const client = new FocusClawClient(config)
   const server = new McpServer({
     name: 'focusclaw',
-    version: '2026.9.1-1',
+    version: '2026.9.25',
   }, {
     instructions: [
       'Use FocusClaw as the user-owned source of truth for projects and tasks.',

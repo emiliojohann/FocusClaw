@@ -1,7 +1,7 @@
 import {
   Check, CalendarDays, X, Bot, User, Plus,
   MessageSquare, Send, BarChart3, Trash2, Pencil, Save,
-  Paperclip, ExternalLink, FileText, Image, Folder, File, AlertTriangle, Star
+  Paperclip, ExternalLink, FileText, Image, Folder, File, AlertTriangle, Star, GripVertical
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { DatePicker } from './DatePicker'
@@ -13,7 +13,7 @@ import {
   RECURRING_OPTIONS,
 } from '@/lib/shared'
 import { dueDateToLocalDateKey } from '@/lib/dates'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 
 interface CommentEntry {
   id: string
@@ -54,6 +54,7 @@ const PRIORITY_CONFIG: Record<number, { label: string; badge: string; color: str
   4: { label: 'Low', badge: 'badge-low', color: '#71717a', bgColor: 'rgba(113,113,122,0.12)', borderColor: 'rgba(113,113,122,0.3)', activeTextColor: '#ffffff' },
 }
 const COMMENT_MAX_LENGTH = 1000
+type SubtaskSort = 'manual' | 'priority' | 'title' | 'status'
 
 interface TaskPanelProps {
   // Panel state
@@ -111,6 +112,7 @@ interface TaskPanelProps {
   onAddSubtask: () => void
   onUpdateSubtask?: (subtaskId: string, updates: Partial<{ title: string; priority: number; archived: boolean }>) => Promise<void> | void
   onDeleteSubtask?: (subtaskId: string) => void
+  onReorderSubtasks?: (subtaskIds: string[]) => Promise<void>
   onAddComment: () => void
   onAddAttachment: () => void
   onPickLocalAttachment?: () => Promise<void> | void
@@ -247,6 +249,7 @@ export function TaskPanel({
   onAddSubtask,
   onUpdateSubtask,
   onDeleteSubtask,
+  onReorderSubtasks,
   onAddComment,
   onAddAttachment,
   onPickLocalAttachment,
@@ -266,6 +269,16 @@ export function TaskPanel({
   const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('')
   const [editingSubtaskPriority, setEditingSubtaskPriority] = useState(2)
   const [savingSubtaskId, setSavingSubtaskId] = useState<string | null>(null)
+  const [subtaskSort, setSubtaskSort] = useState<SubtaskSort>('manual')
+  const [reorderingSubtasks, setReorderingSubtasks] = useState(false)
+  const [subtaskOrderError, setSubtaskOrderError] = useState('')
+  const [draggedSubtaskId, setDraggedSubtaskId] = useState<string | null>(null)
+  const [dragOverSubtaskId, setDragOverSubtaskId] = useState<string | null>(null)
+  const subtaskDrag = useRef<{
+    id: string; pointerId: number; startX: number; startY: number; moved: boolean
+    overId: string | null; ghost: HTMLElement; captureTarget: HTMLElement; cleanup: () => void
+  } | null>(null)
+  const subtaskLongPress = useRef<{ pointerId: number; startX: number; startY: number; timer: number } | null>(null)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
   const [editingCommentContent, setEditingCommentContent] = useState('')
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null)
@@ -305,6 +318,161 @@ export function TaskPanel({
     setEditingAttachmentId(null)
     setEditingAttachmentName('')
   }, [selectedTask?.id])
+
+  useEffect(() => {
+    if (subtaskLongPress.current) window.clearTimeout(subtaskLongPress.current.timer)
+    subtaskLongPress.current = null
+    subtaskDrag.current?.cleanup()
+    setSubtaskSort('manual')
+    setSubtaskOrderError('')
+    setDraggedSubtaskId(null)
+    setDragOverSubtaskId(null)
+    subtaskDrag.current = null
+  }, [selectedTask?.id])
+
+  useEffect(() => () => {
+    if (subtaskLongPress.current) window.clearTimeout(subtaskLongPress.current.timer)
+    subtaskDrag.current?.cleanup()
+  }, [])
+
+  const visibleSubtasks = useMemo(() => {
+    const ordered = [...subtasks]
+    if (subtaskSort === 'priority') ordered.sort((a, b) => a.priority - b.priority || a.position - b.position)
+    if (subtaskSort === 'title') ordered.sort((a, b) => a.title.localeCompare(b.title) || a.position - b.position)
+    if (subtaskSort === 'status') ordered.sort((a, b) => Number(a.archived) - Number(b.archived) || a.position - b.position)
+    return ordered
+  }, [subtasks, subtaskSort])
+
+  const persistSubtaskOrder = async (ids: string[]) => {
+    if (!onReorderSubtasks || reorderingSubtasks || ids.every((id, index) => id === visibleSubtasks[index]?.id)) return
+    setReorderingSubtasks(true)
+    setSubtaskOrderError('')
+    try {
+      await onReorderSubtasks(ids)
+    } catch (error) {
+      setSubtaskOrderError(error instanceof Error ? error.message : 'Could not save subtask order')
+    } finally {
+      setReorderingSubtasks(false)
+    }
+  }
+
+  const moveSubtask = (id: string, targetId: string) => {
+    if (subtaskSort !== 'manual' || id === targetId) return
+    const ids = visibleSubtasks.map((subtask) => subtask.id)
+    const from = ids.indexOf(id)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0) return
+    ids.splice(from, 1)
+    ids.splice(to, 0, id)
+    void persistSubtaskOrder(ids)
+  }
+
+  const updateSubtaskDrag = (pointerId: number, clientX: number, clientY: number) => {
+    const drag = subtaskDrag.current
+    if (!drag || drag.pointerId !== pointerId) return
+    if (!drag.moved && Math.abs(clientY - drag.startY) < 5) return
+    drag.moved = true
+    drag.ghost.style.transform = `translate3d(${clientX - drag.startX}px, ${clientY - drag.startY}px, 0) scale(1.015)`
+    setDraggedSubtaskId(drag.id)
+    const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-subtask-id]')
+    drag.overId = target?.dataset.subtaskId ?? null
+    setDragOverSubtaskId(drag.overId)
+  }
+
+  const finishSubtaskDrag = (pointerId: number, cancelled = false) => {
+    const drag = subtaskDrag.current
+    if (!drag || drag.pointerId !== pointerId) return
+    subtaskDrag.current = null
+    drag.cleanup()
+    if (!cancelled && drag.moved && drag.overId) moveSubtask(drag.id, drag.overId)
+    setDraggedSubtaskId(null)
+    setDragOverSubtaskId(null)
+  }
+
+  const startSubtaskDrag = (pointerId: number, clientX: number, clientY: number, id: string, captureTarget: HTMLElement) => {
+    if (subtaskSort !== 'manual' || reorderingSubtasks || !onReorderSubtasks || visibleSubtasks.length < 2) return
+    const row = captureTarget.closest<HTMLElement>('[data-subtask-id]')
+    if (!row) return
+    try { captureTarget.setPointerCapture(pointerId) } catch { /* Window listeners remain active. */ }
+    const bounds = row.getBoundingClientRect()
+    const ghost = row.cloneNode(true) as HTMLElement
+    ghost.removeAttribute('data-subtask-id')
+    ghost.setAttribute('aria-hidden', 'true')
+    Object.assign(ghost.style, {
+      position: 'fixed', zIndex: '9999', pointerEvents: 'none', width: `${bounds.width}px`,
+      height: `${bounds.height}px`, left: `${bounds.left}px`, top: `${bounds.top}px`,
+      margin: '0', opacity: '0.94', boxShadow: '0 18px 48px rgba(0, 0, 0, 0.45)',
+      transform: 'translate3d(0, 0, 0) scale(1.015)', willChange: 'transform',
+    })
+    document.body.appendChild(ghost)
+    const onMove = (event: globalThis.PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      if (event.cancelable) event.preventDefault()
+      updateSubtaskDrag(pointerId, event.clientX, event.clientY)
+    }
+    const onUp = (event: globalThis.PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      updateSubtaskDrag(pointerId, event.clientX, event.clientY)
+      finishSubtaskDrag(pointerId)
+    }
+    const onCancel = (event: globalThis.PointerEvent) => finishSubtaskDrag(event.pointerId, true)
+    const onBlur = () => finishSubtaskDrag(pointerId, true)
+    const onTouchMove = (event: TouchEvent) => { if (event.cancelable) event.preventDefault() }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('pointerup', onUp, true)
+      window.removeEventListener('pointercancel', onCancel, true)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('touchmove', onTouchMove)
+      ghost.remove()
+      try { if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId) } catch { /* Already released. */ }
+    }
+    subtaskDrag.current = { id, pointerId, startX: clientX, startY: clientY, moved: false, overId: null, ghost, captureTarget, cleanup }
+    window.addEventListener('pointermove', onMove, { capture: true, passive: false })
+    window.addEventListener('pointerup', onUp, true)
+    window.addEventListener('pointercancel', onCancel, true)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    setSubtaskOrderError('')
+  }
+
+  const handleSubtaskPointerDown = (event: PointerEvent<HTMLElement>, id: string) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    startSubtaskDrag(event.pointerId, event.clientX, event.clientY, id, event.currentTarget)
+  }
+
+  const handleSubtaskRowPointerDown = (event: PointerEvent<HTMLDivElement>, id: string) => {
+    if (event.pointerType === 'mouse' || subtaskSort !== 'manual' || reorderingSubtasks ||
+      !onReorderSubtasks || visibleSubtasks.length < 2 ||
+      (event.target as HTMLElement).closest('button, input, select, textarea')) return
+    const row = event.currentTarget
+    const pending = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, timer: 0 }
+    pending.timer = window.setTimeout(() => {
+      if (subtaskLongPress.current !== pending) return
+      subtaskLongPress.current = null
+      window.getSelection()?.removeAllRanges()
+      startSubtaskDrag(pending.pointerId, pending.startX, pending.startY, id, row)
+    }, 500)
+    subtaskLongPress.current = pending
+  }
+
+  const handleSubtaskRowPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const pending = subtaskLongPress.current
+    if (!pending || pending.pointerId !== event.pointerId) return
+    if (Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY) > 10) {
+      window.clearTimeout(pending.timer)
+      subtaskLongPress.current = null
+    }
+  }
+
+  const clearSubtaskLongPress = (pointerId: number) => {
+    const pending = subtaskLongPress.current
+    if (!pending || pending.pointerId !== pointerId) return
+    window.clearTimeout(pending.timer)
+    subtaskLongPress.current = null
+  }
 
   const startEditingSubtask = (subtask: Subtask) => {
     setEditingSubtaskId(subtask.id)
@@ -795,13 +963,27 @@ export function TaskPanel({
               <div className="pt-2 border-t border-[var(--border)]">
                 <div className="flex items-center justify-between mb-3">
                   <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Subtasks</label>
-                  <button
-                    onClick={() => setShowSubtaskForm(!showSubtaskForm)}
-                    className="btn btn-ghost text-[10px] py-1 px-2"
-                  >
-                    <Plus className="w-3 h-3" /> Add
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={subtaskSort}
+                      onChange={(event) => setSubtaskSort(event.target.value as SubtaskSort)}
+                      aria-label="Sort subtasks"
+                      className="input h-8 w-auto text-[11px] fc-control fc-select-control"
+                    >
+                      <option value="manual">Manual order</option>
+                      <option value="priority">Priority</option>
+                      <option value="title">Title A-Z</option>
+                      <option value="status">Incomplete first</option>
+                    </select>
+                    <button
+                      onClick={() => setShowSubtaskForm(!showSubtaskForm)}
+                      className="btn btn-ghost text-[10px] py-1 px-2"
+                    >
+                      <Plus className="w-3 h-3" /> Add
+                    </button>
+                  </div>
                 </div>
+                {subtaskOrderError ? <p role="alert" className="mb-2 text-xs text-red-400">{subtaskOrderError}</p> : null}
 
                 {showSubtaskForm && (
                   <div className="mb-3 p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] space-y-2">
@@ -838,15 +1020,45 @@ export function TaskPanel({
                   {subtasks.length === 0 ? (
                     <p className="text-zinc-600 text-xs text-center py-3">No subtasks</p>
                   ) : (
-                    subtasks.map((st) => {
+                    visibleSubtasks.map((st, index) => {
                       const sp = PRIORITY_CONFIG[st.priority] || PRIORITY_CONFIG[4]
                       const isEditing = editingSubtaskId === st.id
                       return (
                         <div
                           key={st.id}
-                          className="flex items-center gap-2 p-2 rounded-lg bg-[var(--bg-elevated)]"
+                          data-subtask-id={st.id}
+                          onPointerDown={(event) => handleSubtaskRowPointerDown(event, st.id)}
+                          onPointerMove={handleSubtaskRowPointerMove}
+                          onPointerUp={(event) => clearSubtaskLongPress(event.pointerId)}
+                          onPointerCancel={(event) => clearSubtaskLongPress(event.pointerId)}
+                          className={`fc-subtask-drag-row flex gap-2 p-2 rounded-lg bg-[var(--bg-elevated)] ${isEditing ? 'flex-col items-stretch' : 'items-center'} ${draggedSubtaskId === st.id ? 'opacity-60' : ''} ${dragOverSubtaskId === st.id && draggedSubtaskId !== st.id ? 'ring-2 ring-[var(--accent)]' : ''}`}
                         >
-                          <button
+                          {onReorderSubtasks && !isEditing ? (
+                            <button
+                              type="button"
+                              onPointerDown={(event) => handleSubtaskPointerDown(event, st.id)}
+                              draggable={false}
+                              onDragStart={(event) => event.preventDefault()}
+                              onKeyDown={(event) => {
+                                if (subtaskSort !== 'manual') return
+                                if (event.key === 'ArrowUp' && index > 0) {
+                                  event.preventDefault()
+                                  moveSubtask(st.id, visibleSubtasks[index - 1].id)
+                                }
+                                if (event.key === 'ArrowDown' && index < visibleSubtasks.length - 1) {
+                                  event.preventDefault()
+                                  moveSubtask(st.id, visibleSubtasks[index + 1].id)
+                                }
+                              }}
+                              disabled={subtaskSort !== 'manual' || reorderingSubtasks || visibleSubtasks.length < 2}
+                              className={`fc-subtask-drag-handle flex h-11 w-7 shrink-0 touch-none items-center justify-center rounded-md text-zinc-500 hover:bg-[var(--bg-card)] hover:text-zinc-200 sm:h-7 sm:w-6 ${draggedSubtaskId === st.id ? 'cursor-grabbing' : 'cursor-grab'} disabled:cursor-not-allowed disabled:opacity-30`}
+                              title="Drag to reorder; use Up/Down arrow keys from this handle"
+                              aria-label={`Reorder ${st.title}; use Up or Down arrow key`}
+                            >
+                              <GripVertical className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                          {!isEditing ? <button
                             type="button"
                             onClick={() => void toggleSubtaskComplete(st)}
                             disabled={!onUpdateSubtask || savingSubtaskId === st.id}
@@ -859,9 +1071,9 @@ export function TaskPanel({
                             aria-label={`${st.archived ? 'Mark not done' : 'Mark done'}: ${st.title}`}
                           >
                             <Check className="h-3 w-3" />
-                          </button>
+                          </button> : null}
                           {isEditing ? (
-                            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                            <div className="min-w-0 w-full space-y-2">
                               <input
                                 type="text"
                                 value={editingSubtaskTitle}
@@ -873,82 +1085,81 @@ export function TaskPanel({
                                   }
                                   if (e.key === 'Escape') cancelEditingSubtask()
                                 }}
-                                className="input h-8 min-w-0 flex-1 text-xs"
+                                className="input h-9 w-full min-w-0 text-sm"
+                                aria-label={`Edit subtask title: ${st.title}`}
                                 autoFocus
                               />
-                              <select
-                                value={editingSubtaskPriority}
-                                onChange={(e) => setEditingSubtaskPriority(Number(e.target.value))}
-                                className="input h-8 text-xs fc-control fc-select-control sm:w-28"
-                              >
-                                <option value={1}>Critical</option>
-                                <option value={2}>High</option>
-                                <option value={3}>Medium</option>
-                                <option value={4}>Low</option>
-                              </select>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <select
+                                  value={editingSubtaskPriority}
+                                  onChange={(e) => setEditingSubtaskPriority(Number(e.target.value))}
+                                  className="input h-9 min-w-0 flex-1 text-xs fc-control fc-select-control"
+                                  aria-label={`Priority for ${st.title}`}
+                                >
+                                  <option value={1}>Critical</option>
+                                  <option value={2}>High</option>
+                                  <option value={3}>Medium</option>
+                                  <option value={4}>Low</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveEditingSubtask()}
+                                  disabled={savingSubtaskId === st.id || !editingSubtaskTitle.trim()}
+                                  className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 text-zinc-400 hover:text-[var(--accent)]"
+                                  title="Save subtask"
+                                  aria-label={`Save subtask ${st.title}`}
+                                >
+                                  <Save className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelEditingSubtask}
+                                  className="btn btn-ghost !h-9 !w-9 shrink-0 !p-0 text-zinc-500 hover:text-zinc-300"
+                                  title="Cancel edit"
+                                  aria-label={`Cancel editing ${st.title}`}
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <>
                               <span className={`flex-1 min-w-0 break-words text-xs ${st.archived ? 'text-zinc-600 line-through' : 'text-zinc-300'}`}>
                                 {st.title}
                               </span>
+                              <div className="ml-1 flex h-7 shrink-0 items-center gap-1">
+                                <span
+                                  className="flex h-7 w-7 items-center justify-center rounded-md"
+                                  title={`${sp.label} priority`}
+                                  aria-label={`${sp.label} priority`}
+                                >
+                                  <BarChart3 className="w-3.5 h-3.5" style={{ color: sp.color }} />
+                                </span>
+                                {onUpdateSubtask ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditingSubtask(st)}
+                                    className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-zinc-300"
+                                    title="Edit subtask"
+                                    aria-label={`Edit subtask ${st.title}`}
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : null}
+                                {onDeleteSubtask ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSubtaskPendingDelete(st)}
+                                    className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-red-400"
+                                    title="Delete subtask"
+                                    aria-label={`Delete subtask ${st.title}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : null}
+                              </div>
                             </>
                           )}
-                          <div className="ml-1 flex h-7 shrink-0 items-center gap-1">
-                            {!isEditing ? (
-                              <span
-                                className="flex h-7 w-7 items-center justify-center rounded-md"
-                                title={`${sp.label} priority`}
-                                aria-label={`${sp.label} priority`}
-                              >
-                                <BarChart3 className="w-3.5 h-3.5" style={{ color: sp.color }} />
-                              </span>
-                            ) : null}
-                          {isEditing ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => void saveEditingSubtask()}
-                                disabled={savingSubtaskId === st.id || !editingSubtaskTitle.trim()}
-                                className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-400 hover:text-[var(--accent)]"
-                                title="Save subtask"
-                                aria-label={`Save subtask ${st.title}`}
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelEditingSubtask}
-                                className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-zinc-300"
-                                title="Cancel edit"
-                                aria-label={`Cancel editing ${st.title}`}
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          ) : onUpdateSubtask ? (
-                            <button
-                              type="button"
-                              onClick={() => startEditingSubtask(st)}
-                              className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-zinc-300"
-                              title="Edit subtask"
-                              aria-label={`Edit subtask ${st.title}`}
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                          ) : null}
-                          {onDeleteSubtask ? (
-                            <button
-                              type="button"
-                              onClick={() => setSubtaskPendingDelete(st)}
-                              className="btn btn-ghost !h-7 !w-7 !p-0 text-zinc-500 hover:text-red-400"
-                              title="Delete subtask"
-                              aria-label={`Delete subtask ${st.title}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          ) : null}
-                          </div>
                         </div>
                       )
                     })

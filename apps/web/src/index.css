@@ -861,6 +861,21 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   -webkit-user-drag: none;
 }
 
+.fc-subtask-drag-handle {
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+}
+
+@media (pointer: coarse) {
+  .fc-subtask-drag-handle { min-width: 2.75rem; }
+  .fc-subtask-drag-row {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
 .fc-list-manual-drag-handle {
   position: absolute;
   left: -2.5rem;

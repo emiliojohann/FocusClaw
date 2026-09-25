@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.09.25 - 2026-09-25
+
+- Added Manual, Priority, Title A-Z, and Incomplete First sorting for subtasks in both Tasks and Calendar detail panels.
+- Added persistent manual subtask ordering with a drag handle, desktop grab cursor, keyboard Up/Down controls, and a floating drag preview. On mobile, a 44px handle or a 0.5-second long press on a subtask row starts the same drag; normal swipes still scroll.
+- Added an atomic, parent-bound subtask reorder API that rejects stale lists, duplicate IDs, and cross-parent moves.
+- Fixed subtask editing at narrow panel widths by giving the title a full-width field above priority and Save/Cancel controls.
+- Updated app, API, plugin, landing, MCP, package, and backup version metadata to `2026.9.25` / `v2026.09.25`.
+
 ## v2026.09.01.1 - 2026-09-02
 
 - Added a portable MCP server package for connecting FocusClaw to MCP-compatible AI clients, with guarded configuration, sanitized errors, tool coverage, setup documentation, and a read-only smoke test.

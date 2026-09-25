@@ -1281,6 +1281,30 @@ export async function taskRoutes(fastify: FastifyInstance) {
     return reply.send(result)
   })
 
+  // POST /tasks/:id/subtasks/reorder — persist the complete order for one parent.
+  fastify.post('/:id/subtasks/reorder', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const { subtaskIds } = (request.body ?? {}) as { subtaskIds?: string[] }
+    if (!isValidUUID(id) || !Array.isArray(subtaskIds) || subtaskIds.length < 2 || subtaskIds.length > 2000 ||
+      subtaskIds.some((subtaskId) => !isValidUUID(subtaskId)) || new Set(subtaskIds).size !== subtaskIds.length) {
+      return reply.status(400).send({ error: 'subtaskIds must contain 2-2000 unique valid IDs' })
+    }
+
+    const siblings = sqlite.prepare(`
+      SELECT id FROM tasks WHERE parent_id = ? ORDER BY position ASC, created_at ASC, id ASC
+    `).all(id) as Array<{ id: string }>
+    const expected = new Set(siblings.map((subtask) => subtask.id))
+    if (siblings.length !== subtaskIds.length || subtaskIds.some((subtaskId) => !expected.has(subtaskId))) {
+      return reply.status(409).send({ error: 'Subtask list changed; refresh and try again' })
+    }
+
+    const updatePosition = sqlite.prepare('UPDATE tasks SET position = ?, updated_at = unixepoch() WHERE id = ?')
+    sqlite.transaction(() => {
+      subtaskIds.forEach((subtaskId, position) => updatePosition.run(position, subtaskId))
+    })()
+    return reply.send({ success: true, reorderedCount: subtaskIds.length })
+  })
+
   // POST /tasks/:id/subtasks — add a subtask to a task
   fastify.post('/:id/subtasks', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string }

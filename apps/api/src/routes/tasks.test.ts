@@ -817,6 +817,43 @@ test('project task list includes subtask completion counts', async () => {
   }
 })
 
+test('subtask reorder persists per parent and rejects stale or cross-parent IDs', async () => {
+  const server = await createServer()
+  try {
+    const workspace = (await server.inject({ method: 'POST', url: '/api/workspaces',
+      payload: { name: 'Reorder Workspace', slug: `reorder-subtasks-${Date.now()}` } })).json()
+    const project = (await server.inject({ method: 'POST', url: '/api/projects',
+      payload: { workspaceId: workspace.id, name: 'Inbox' } })).json()
+    const createTask = async (title: string) => (await server.inject({ method: 'POST', url: '/api/tasks',
+      payload: { projectId: project.id, title } })).json()
+    const parent = await createTask('Parent')
+    const otherParent = await createTask('Other parent')
+    const createSubtask = async (taskId: string, title: string) => (await server.inject({
+      method: 'POST', url: `/api/tasks/${taskId}/subtasks`, payload: { title },
+    })).json()
+    const first = await createSubtask(parent.id, 'First')
+    const second = await createSubtask(parent.id, 'Second')
+    const third = await createSubtask(parent.id, 'Third')
+    const unrelated = await createSubtask(otherParent.id, 'Unrelated')
+    const order = [third.id, first.id, second.id]
+    const response = await server.inject({ method: 'POST', url: `/api/tasks/${parent.id}/subtasks/reorder`,
+      payload: { subtaskIds: order } })
+    assert.equal(response.statusCode, 200)
+    const list = await server.inject({ method: 'GET', url: `/api/tasks/${parent.id}/subtasks` })
+    assert.deepEqual(list.json().map((row: any) => row.id), order)
+    assert.deepEqual(list.json().map((row: any) => row.position), [0, 1, 2])
+    for (const invalid of [[first.id, second.id], [first.id, second.id, unrelated.id]]) {
+      const rejected = await server.inject({ method: 'POST', url: `/api/tasks/${parent.id}/subtasks/reorder`,
+        payload: { subtaskIds: invalid } })
+      assert.equal(rejected.statusCode, 409)
+    }
+    const after = await server.inject({ method: 'GET', url: `/api/tasks/${parent.id}/subtasks` })
+    assert.deepEqual(after.json().map((row: any) => row.id), order)
+  } finally {
+    await server.close()
+  }
+})
+
 test('project task search matches comments and subtasks', async () => {
   const server = await createServer()
   try {

@@ -1,6 +1,6 @@
 {
   "name": "focusclaw",
-  "version": "2026.9.1-1",
+  "version": "2026.9.25",
   "private": true,
   "workspaces": [
     "apps/*",

@@ -48,6 +48,7 @@ The plugin should keep these summaries compact by default: group by project, sho
 | `DELETE` | `/api/tasks/:id/attachments/:attachmentId` | Remove attachment metadata without deleting the original file |
 | `GET` | `/api/tasks/:id/subtasks` | List subtasks |
 | `POST` | `/api/tasks/:id/subtasks` | Add subtask |
+| `POST` | `/api/tasks/:id/subtasks/reorder` | Persist the complete subtask ID order for one parent task |
 | `GET` | `/api/tasks/export` | Export all tasks as CSV |
 | `GET` | `/api/tasks/export/:projectId` | Export one project's tasks as CSV |
 | `GET` | `/api/tags` | List universal tags |

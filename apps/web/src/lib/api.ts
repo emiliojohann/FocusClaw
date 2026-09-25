@@ -148,6 +148,11 @@ export const taskApi = {
   // Subtasks
   getSubtasks: (taskId: string) =>
     request<any[]>(`/tasks/${taskId}/subtasks`),
+  reorderSubtasks: (taskId: string, subtaskIds: string[]) =>
+    request<{ success: boolean }>(`/tasks/${taskId}/subtasks/reorder`, {
+      method: 'POST',
+      body: JSON.stringify({ subtaskIds }),
+    }),
   addSubtask: (taskId: string, data: { title: string; description?: string; priority?: number }) =>
     request<any>(`/tasks/${taskId}/subtasks`, {
       method: 'POST',

@@ -102,6 +102,8 @@ The calendar view shows tasks with due dates and can optionally include complete
 
 Open a task to edit details, add comments, and create subtasks. Comments keep discussion and handoff context attached to the task record so humans, OpenClaw, and Hermes can read the same history.
 
+Subtasks can be viewed in Manual, Priority, Title A-Z, or Incomplete First order. Manual order is saved per parent task: drag the grip on desktop, use Up/Down while the grip is focused, or drag the 44px grip on mobile. A 0.5-second mobile long press on a subtask row also starts a floating drag preview; a normal swipe still scrolls. Editing a subtask gives its title a full-width input with priority and Save/Cancel below it.
+
 ### Descriptions And Attachments
 
 Task descriptions use a simple Live/Code editor. Live is the default editable rendered view; Code shows the raw Markdown for agents and developers.
