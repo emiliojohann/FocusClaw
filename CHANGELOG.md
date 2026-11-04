@@ -1,5 +1,29 @@
 # Changelog
 
+## v2026.11.03 - 2026-11-03
+
+### Bulk Task Rescheduling
+
+- Select multiple tasks and reschedule them together, including overdue tasks across projects.
+- Choose **Today**, **Tomorrow**, **Next Week**, or a custom date using FocusClaw's existing calendar picker. Next Week means seven days from today.
+- Rescheduling preserves projects, completion state, recurrence settings, comments, and unselected tasks. Scheduling a highlighted task away from today clears its Today highlight.
+- Canceling or a failed request keeps the selection intact. Duplicate Apply submissions are prevented.
+- Added `POST /api/tasks/bulk-reschedule` with atomic validation for 1–5,000 task IDs. Invalid dates or missing tasks cannot produce a partial update; dates are stored at server-local end of day.
+
+### Selection and Interface Polish
+
+- Refined the selection bar for desktop and mobile. Mobile keeps **X selected**, **Clear**, a clock-only Reschedule action, and a trash-only Delete action, with accessible names and 44px action touch targets.
+- Matched the selection count's styling to Clear and added mobile-only horizontal padding to both.
+- Removed the selection bar's drop shadow and made its light-theme controls borderless. Light-theme Delete uses the same red text/icon and soft red background as Critical priority.
+- Kept selected check marks white in both themes and fixed the brief white flash when selection squares appear in list and grid views.
+- Replaced the outer accent-colored button focus ring with a restrained neutral inset indicator, preserving keyboard visibility.
+- Kept keyboard focus inside the reschedule dialog and prevented background search shortcuts from interfering with selections.
+- Kept the calendar picker within the reschedule dialog's scrollable area on narrow screens.
+
+### Security and Dependencies
+
+- Updated vulnerable dependencies, including Fastify, the MCP SDK, Zod, Vite, and affected transitive packages.
+
 ## v2026.09.25 - 2026-09-25
 
 - Added Manual, Priority, Title A-Z, and Incomplete First sorting for subtasks in both Tasks and Calendar detail panels.
@@ -84,7 +108,7 @@ Special thanks to [BeardedChop](https://github.com/BeardedChop) for identifying 
 
 ## v2026.07.13.3 - 2026-07-28
 
-- Includes all FocusClaw changes since `v2026.07.13`, including the internal DEV increments `v2026.07.13.1` and `v2026.07.13.2`.
+- Includes all FocusClaw changes since `v2026.07.13`.
 - Fixed the selected Calendar Month/Week label so it remains white in light mode.
 - Matched the inner Month/Week button corner radius concentrically to the surrounding segmented-control field.
 - Made the Month/Week segmented control spacing a consistent 2px on every side.
@@ -96,7 +120,7 @@ Special thanks to [BeardedChop](https://github.com/BeardedChop) for identifying 
 
 ## v2026.07.13 - 2026-07-13
 
-- Includes all FocusClaw changes since `v2026.07.03`, including the internal DEV increments `v2026.07.03.1`, `v2026.07.03.2`, and `v2026.07.03.3`.
+- Includes all FocusClaw changes since `v2026.07.03`.
 - Fixed OpenClaw and Hermes logo rendering so the app icon keeps a stable square footprint when switching between dark and light themes without adding any wrapper border or background.
 - Matched task description and task comment resize affordances by routing both through the same resizable field styling.
 - Added an optimized Hermes app logo preload so the blue theme logo does not flash on refresh.
@@ -122,7 +146,7 @@ Special thanks to:
 
 ### Changes
 
-- Includes all FocusClaw changes since `v2026.6.22`, including the internal DEV increments `v2026.6.22.1`, `v2026.6.22.2`, `v2026.6.22.3`, `v2026.06.30`, and `v2026.07.02`.
+- Includes all FocusClaw changes since `v2026.6.22`.
 - Fixed mobile Calendar new-task launch so the top-bar New Task button opens the task creation popup reliably.
 - Changed new-task project selection to require an explicit "Select a project" choice instead of defaulting to the active or last-used project.
 - Made disabled primary buttons visibly greyed out until required fields are complete.
@@ -209,7 +233,7 @@ Special thanks to https://x.com/m_zokov for the help provided on this release.
 
 - Includes the earlier `v2026.6.11` app polish that was never released separately.
 - Fixed task edits so clearing an existing due date persists a null due date.
-- Added a Settings contact/feedback card for `social@focusclaw.app`.
+- Added a Settings contact/feedback card.
 - Added lightweight GitHub latest-release visibility in the app shell and Settings/About.
 - Added a compact mobile top bar with the FocusClaw logo while keeping bottom navigation and improving mobile navigation behavior.
 - Capped the default Tasks list display at 50 matching tasks with a Show more affordance.

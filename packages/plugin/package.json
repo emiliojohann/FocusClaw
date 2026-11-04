@@ -1,6 +1,6 @@
 {
   "name": "@emiliojohann/focusclaw-openclaw",
-  "version": "2026.9.25",
+  "version": "2026.11.3",
   "type": "module",
   "description": "OpenClaw plugin for FocusClaw task context",
   "main": "dist/index.js",

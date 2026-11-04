@@ -1216,7 +1216,7 @@ export default function SettingsPage() {
             </div>
             <p className="text-xs text-zinc-500 mb-4">Feature requests, comments, bugs, or just saying hi are welcome.</p>
             <a
-              href="mailto:social@focusclaw.app?subject=FocusClaw%20feedback"
+              href="https://github.com/emiliojohann/FocusClaw/issues"
               className="btn btn-primary text-xs w-full sm:w-auto"
             >
               Contact

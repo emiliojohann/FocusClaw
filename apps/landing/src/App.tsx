@@ -424,7 +424,7 @@ await fetch('/api/tasks/' + task.id, {
             <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
               <input
                 type="email"
-                placeholder="you@example.com"
+                placeholder="Email address"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input flex-1"

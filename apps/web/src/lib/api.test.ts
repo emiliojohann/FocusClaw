@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { apiKey, projectApi } from './api'
+import { apiKey, projectApi, taskApi } from './api'
 import {
   hasHydratedDashboardStatus,
   readCachedInProgressStatusId,
@@ -41,6 +41,23 @@ test('request helper sends saved x-api-key header', async () => {
   await projectApi.list('workspace-id')
 
   assert.equal((headers as Record<string, string>)['x-api-key'], 'header-key')
+})
+
+test('bulk reschedule sends date-only payload and surfaces server validation errors', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    const result = { rescheduledCount: 2, clearedHighlightCount: 1, dueDate: '2032-03-01T07:59:59.000Z' }
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, '/api/tasks/bulk-reschedule')
+      assert.equal(init?.method, 'POST')
+      assert.deepEqual(JSON.parse(init?.body as string), { taskIds: ['first', 'second'], dueDate: '2032-02-29' })
+      assert.equal((init?.headers as Record<string, string>)['Content-Type'], 'application/json')
+      return new Response(JSON.stringify(result), { status: 200 })
+    }
+    assert.deepEqual(await taskApi.bulkReschedule(['first', 'second'], '2032-02-29'), result)
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'No tasks changed' }), { status: 404 })
+    await assert.rejects(taskApi.bulkReschedule(['missing'], '2032-02-29'), /No tasks changed/)
+  } finally { globalThis.fetch = originalFetch }
 })
 
 test('new task project requires an explicit project selection', () => {

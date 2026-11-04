@@ -32,8 +32,9 @@ import {
   type AssigneeFilter,
 } from '@/lib/shared'
 import { resolveTaskProjectId } from '@/lib/taskForm'
-import { dueDateToLocalDateKey } from '@/lib/dates'
+import { dueDateToLocalDateKey, localDateKey } from '@/lib/dates'
 import { moveTaskAfter, moveTaskBefore, reorderManualSubset } from '@/lib/manualOrder'
+import { containModalFocus, handleDashboardSearchShortcut, handleModalKeyDown, restoreModalFocus } from '@/lib/dashboardKeyboard'
 
 interface Task {
   id: string
@@ -458,6 +459,14 @@ export default function DashboardPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkDeleteError, setBulkDeleteError] = useState('')
   const [bulkDeleteMessage, setBulkDeleteMessage] = useState('')
+  const [bulkRescheduleOpen, setBulkRescheduleOpen] = useState(false)
+  const [bulkDueDate, setBulkDueDate] = useState('')
+  const [bulkRescheduling, setBulkRescheduling] = useState(false)
+  const [bulkRescheduleError, setBulkRescheduleError] = useState('')
+  const bulkRescheduleLock = useRef(false)
+  const bulkRescheduleDialog = useRef<HTMLDivElement>(null)
+  const bulkRescheduleTrigger = useRef<HTMLButtonElement>(null)
+  const selectTasksControl = useRef<HTMLButtonElement>(null)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null)
   const [manualSortError, setManualSortError] = useState('')
@@ -693,23 +702,12 @@ export default function DashboardPage() {
   }, [searchQuery])
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      const isTypingTarget = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
-      if (event.key === '/' && !isTypingTarget) {
-        event.preventDefault()
-        desktopSearchInputRef.current?.focus()
-      } else if (
-        event.key === 'Escape' &&
-        searchQuery &&
-        (document.activeElement === desktopSearchInputRef.current || document.activeElement === mobileSearchInputRef.current)
-      ) {
-        event.preventDefault()
-        clearTaskSearch()
-      }
+      handleDashboardSearchShortcut(event, bulkRescheduleOpen, searchQuery,
+        desktopSearchInputRef.current, mobileSearchInputRef.current, document.activeElement, clearTaskSearch)
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [searchQuery])
+  }, [searchQuery, bulkRescheduleOpen])
 
   const initWorkspace = async () => {
     try {
@@ -969,6 +967,8 @@ export default function DashboardPage() {
   }
 
   const toggleBulkSelectionMode = () => {
+    if (bulkRescheduleLock.current) return
+    setBulkRescheduleOpen(false)
     setBulkSelectionMode((active) => !active)
     setSelectedTask(null)
     setSelectedTaskIds(new Set())
@@ -977,6 +977,7 @@ export default function DashboardPage() {
   }
 
   const toggleTaskSelection = (taskId: string) => {
+    if (bulkRescheduleOpen || bulkRescheduleLock.current) return
     setSelectedTaskIds((current) => {
       const next = new Set(current)
       if (next.has(taskId)) next.delete(taskId)
@@ -989,6 +990,64 @@ export default function DashboardPage() {
     if (bulkDeleting) return
     setBulkDeletePending(false)
     setBulkDeleteError('')
+  }
+
+  const cancelBulkReschedule = () => {
+    if (bulkRescheduleLock.current) return
+    setBulkRescheduleOpen(false)
+    setBulkRescheduleError('')
+  }
+
+  useEffect(() => {
+    if (!bulkRescheduleOpen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = bulkRescheduleDialog.current
+      if (dialog) handleModalKeyDown(event, dialog, document.activeElement, cancelBulkReschedule)
+    }
+    const onFocusIn = () => {
+      const dialog = bulkRescheduleDialog.current
+      if (dialog) containModalFocus(dialog, document.activeElement)
+    }
+    onFocusIn()
+    window.addEventListener('keydown', onKeyDown)
+    document.addEventListener('focusin', onFocusIn)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('focusin', onFocusIn)
+      // Wait for React to remove the dialog/conditional Reschedule trigger.
+      window.requestAnimationFrame(() => restoreModalFocus(bulkRescheduleTrigger.current, selectTasksControl.current))
+    }
+  }, [bulkRescheduleOpen])
+
+  const handleBulkReschedule = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (bulkRescheduleLock.current || !bulkDueDate || selectedTaskIds.size === 0) return
+    bulkRescheduleLock.current = true
+    setBulkRescheduling(true)
+    setBulkRescheduleError('')
+    const ids = new Set(selectedTaskIds)
+    try {
+      const result = await taskApi.bulkReschedule([...ids], bulkDueDate)
+      setCachedTasks((current) => current.map((task) => ids.has(task.id)
+        ? { ...task, dueDate: result.dueDate, highlight: result.clearedHighlightCount > 0 ? false : task.highlight }
+        : task).filter((task) => shouldKeepTaskInDashboard(task, projectFilter, filter))
+        .sort((a, b) => compareTasks(a, b, sort)))
+      try { window.localStorage.removeItem('focusclaw.calendar.snapshot') } catch { /* Cache is optional. */ }
+      setBulkRescheduleOpen(false)
+      setSelectedTaskIds(new Set())
+      setBulkSelectionMode(false)
+      setBulkDeleteMessage(`${result.rescheduledCount} ${result.rescheduledCount === 1 ? 'task' : 'tasks'} rescheduled`)
+      window.setTimeout(() => setBulkDeleteMessage(''), 3000)
+      await loadTasks()
+    } catch (error) {
+      setBulkRescheduleError(error instanceof Error ? error.message : 'Could not reschedule the selected tasks')
+    } finally {
+      bulkRescheduleLock.current = false
+      setBulkRescheduling(false)
+    }
   }
 
   const handleBulkDelete = async () => {
@@ -1721,6 +1780,7 @@ export default function DashboardPage() {
             <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap px-3 pb-1 pr-10 sm:mx-0 sm:gap-2 sm:px-0 sm:pr-0 fc-scrollbar-hidden">
               <button
                 type="button"
+                ref={selectTasksControl}
                 onClick={toggleBulkSelectionMode}
                 disabled={!initialized || filteredTasks.length === 0}
                 className={`btn text-xs fc-control !w-9 !p-0 shrink-0 ${bulkSelectionMode ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'btn-secondary'}`}
@@ -1865,26 +1925,40 @@ export default function DashboardPage() {
         {/* Content */}
         <div className="flex-1 overflow-auto p-3 sm:p-4 md:p-6">
           {bulkSelectionMode ? (
-            <div className="sticky top-0 z-30 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)]/95 p-3 shadow-xl backdrop-blur-xl">
-              <span className="mr-auto text-xs font-medium text-zinc-300">
-                {selectedTaskIds.size} selected
+            <div className="fc-bulk-actions sticky top-0 z-30 mb-3 flex flex-nowrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)]/95 p-3 backdrop-blur-xl">
+              <span aria-label={`${selectedTaskIds.size} tasks selected`} data-empty={selectedTaskIds.size === 0} className="fc-selection-count btn btn-secondary mr-auto text-xs font-normal tabular-nums">
+                {selectedTaskIds.size}<span> selected</span>
               </span>
               <button
                 type="button"
                 onClick={() => setSelectedTaskIds(new Set())}
                 disabled={selectedTaskIds.size === 0}
-                className="btn btn-secondary text-xs font-normal"
+                className="fc-bulk-clear btn btn-secondary text-xs font-normal"
               >
                 Clear
+              </button>
+              <button
+                ref={bulkRescheduleTrigger}
+                type="button"
+                onClick={() => { setBulkDueDate(localDateKey(new Date())); setBulkRescheduleError(''); setBulkRescheduleOpen(true) }}
+                disabled={selectedTaskIds.size === 0 || bulkRescheduling}
+                aria-label="Reschedule selected tasks"
+                title="Reschedule selected tasks"
+                className="btn btn-secondary w-11 shrink-0 sm:w-auto text-xs font-normal"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Reschedule</span>
               </button>
               <button
                 type="button"
                 onClick={() => { setBulkDeleteError(''); setBulkDeletePending(true) }}
                 disabled={selectedTaskIds.size === 0}
-                className="btn text-xs font-normal bg-red-500/15 text-red-300"
+                aria-label="Delete selected tasks"
+                title="Delete selected tasks"
+                className="fc-bulk-delete btn w-11 shrink-0 sm:w-auto text-xs font-normal bg-red-500/15 text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Delete
+                <span className="hidden sm:inline">Delete</span>
               </button>
             </div>
           ) : null}
@@ -1950,11 +2024,12 @@ export default function DashboardPage() {
                     <div className="flex items-start justify-between gap-3">
                       {bulkSelectionMode ? (
                         <div
+                          key="bulk-selection"
                           className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border-2 transition-colors sm:h-5 sm:w-5 ${isSelected ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-zinc-600'}`}
                           role="checkbox"
                           aria-checked={isSelected}
                         >
-                          {isSelected ? <Check className="h-3 w-3 text-white" /> : null}
+                          {isSelected ? <Check className="fc-selection-check h-3 w-3" /> : null}
                         </div>
                       ) : (
                         <div className="flex shrink-0 items-center">
@@ -2056,11 +2131,12 @@ export default function DashboardPage() {
                     <div className="flex items-start gap-3">
                       {bulkSelectionMode ? (
                         <div
+                          key="bulk-selection"
                           className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border-2 transition-colors sm:h-5 sm:w-5 ${isSelected ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-zinc-600'}`}
                           role="checkbox"
                           aria-checked={isSelected}
                         >
-                          {isSelected ? <Check className="h-3 w-3 text-white" /> : null}
+                          {isSelected ? <Check className="fc-selection-check h-3 w-3" /> : null}
                         </div>
                       ) : (
                         <div className="flex shrink-0 items-center">
@@ -2371,6 +2447,33 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </>
+      ) : null}
+      {bulkRescheduleOpen ? (
+        <>
+          <div className="fixed inset-0 bg-black/70 z-[220] backdrop" onClick={cancelBulkReschedule} />
+          <div ref={bulkRescheduleDialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="bulk-reschedule-title" aria-describedby="bulk-reschedule-note" aria-busy={bulkRescheduling}
+            className="fixed top-1/2 left-1/2 z-[230] w-[calc(100%-2rem)] max-w-md max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] p-5 shadow-2xl">
+            <h3 id="bulk-reschedule-title" className="text-sm font-semibold text-[var(--text-primary)]">Reschedule Selected Tasks</h3>
+            <form onSubmit={handleBulkReschedule} className="mt-4 space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {[['Today', 0], ['Tomorrow', 1], ['Next Week', 7]].map(([label, days]) => (
+                  <button key={label} type="button" autoFocus={days === 0} disabled={bulkRescheduling} className="btn btn-secondary min-h-10 text-xs"
+                    onClick={() => { const date = new Date(); date.setDate(date.getDate() + Number(days)); setBulkDueDate(localDateKey(date)); setBulkRescheduleError('') }}>{label}</button>
+                ))}
+              </div>
+              <div>
+                <DatePicker id="bulk-due-date" value={bulkDueDate} disabled={bulkRescheduling} inline
+                  onChange={(date) => { setBulkDueDate(date); setBulkRescheduleError('') }} buttonClassName="min-h-11" />
+                <p id="bulk-reschedule-note" className="mt-2 text-xs text-[var(--text-muted)]">Next week means seven days from today.</p>
+              </div>
+              {bulkRescheduleError ? <p role="alert" className="text-xs text-red-300">{bulkRescheduleError}</p> : null}
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={cancelBulkReschedule} disabled={bulkRescheduling} className="btn btn-secondary min-h-11 text-xs">Cancel</button>
+                <button type="submit" disabled={bulkRescheduling || !bulkDueDate || selectedTaskIds.size === 0} className="btn btn-primary min-h-11 text-xs">{bulkRescheduling ? 'Applying...' : 'Apply'}</button>
+              </div>
+            </form>
           </div>
         </>
       ) : null}

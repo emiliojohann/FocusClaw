@@ -8,13 +8,16 @@ interface DatePickerProps {
   placeholder?: string
   className?: string
   buttonClassName?: string
+  id?: string
+  disabled?: boolean
+  inline?: boolean
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
 const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 
-export function DatePicker({ value, onChange, placeholder = 'Select date', className = '', buttonClassName = '' }: DatePickerProps) {
+export function DatePicker({ value, onChange, placeholder = 'Select date', className = '', buttonClassName = '', id, disabled = false, inline = false }: DatePickerProps) {
   const [open, setOpen] = useState(false)
   const [placement, setPlacement] = useState<'top' | 'bottom'>('bottom')
   const [align, setAlign] = useState<'left' | 'right'>('left')
@@ -25,7 +28,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
   const ref = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
-    if (!open) return
+    if (!open || inline) return
 
     const updatePlacement = () => {
       const rect = ref.current?.getBoundingClientRect()
@@ -54,7 +57,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
       window.visualViewport?.removeEventListener('resize', updatePlacement)
       window.visualViewport?.removeEventListener('scroll', updatePlacement)
     }
-  }, [open])
+  }, [open, inline])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -100,7 +103,9 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
   return (
     <div ref={ref} className={`relative ${className}`}>
       <button
+        id={id}
         type="button"
+        disabled={disabled}
         onClick={() => setOpen(!open)}
         className={`input text-xs w-full flex items-center gap-2 justify-between ${buttonClassName}`}
       >
@@ -110,18 +115,18 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
 
       {open && (
         <div
-          className={`fc-date-picker-popover absolute z-50 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3 shadow-2xl ${
-            placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
-          } ${align === 'right' ? 'right-0' : 'left-0'}`}
-          style={{ width: 'min(22rem, calc(100vw - 24px))' }}
+          className={`fc-date-picker-popover z-50 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3 ${inline
+            ? 'relative mt-2'
+            : `absolute shadow-2xl ${placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'} ${align === 'right' ? 'right-0' : 'left-0'}`}`}
+          style={{ width: inline ? '100%' : 'min(22rem, calc(100vw - 24px))' }}
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-3">
-            <button type="button" onClick={prevMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
+            <button type="button" disabled={disabled} onClick={prevMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
               <ChevronLeft className="w-4 h-4 text-zinc-400" />
             </button>
             <span className="text-white text-xs font-semibold">{MONTHS[month]} {year}</span>
-            <button type="button" onClick={nextMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
+            <button type="button" disabled={disabled} onClick={nextMonth} className="p-1 hover:bg-[var(--bg-elevated)] rounded-lg transition-colors">
               <ChevronRight className="w-4 h-4 text-zinc-400" />
             </button>
           </div>
@@ -148,6 +153,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
                 <button
                   type="button"
                   key={`${year}-${month}-${day}`}
+                  disabled={disabled}
                   onClick={() => selectDate(day)}
                   className={`
                     w-8 h-8 rounded-lg text-xs font-medium transition-all
@@ -168,6 +174,7 @@ export function DatePicker({ value, onChange, placeholder = 'Select date', class
           {/* Today shortcut */}
           <button
             type="button"
+            disabled={disabled}
             onClick={() => {
               const t = new Date(); t.setHours(0,0,0,0)
               onChange(localDateKey(t))

@@ -1000,6 +1000,87 @@ test('explicit recurring option creates recurring tasks', async () => {
   }
 })
 
+test('bulk reschedule is selected-only, cross-project, deduplicated, and preserves task state', async () => {
+  const server = await createServer()
+  try {
+    const workspace = (await server.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Reschedule', slug: `reschedule-${Date.now()}` } })).json()
+    const makeProject = async (name: string) => (await server.inject({ method: 'POST', url: '/api/projects', payload: { workspaceId: workspace.id, name } })).json()
+    const first = await makeProject('First')
+    const second = await makeProject('Second')
+    const makeTask = async (projectId: string, title: string) => {
+      const response = await server.inject({ method: 'POST', url: '/api/tasks', payload: { projectId, title, dueDate: '2020-01-01', description: 'Keep me', recurring: 'weekly', priority: 3, labels: ['keep'] } })
+      assert.equal(response.statusCode, 201)
+      return response.json()
+    }
+    const a = await makeTask(first.id, 'Selected A')
+    const b = await makeTask(second.id, 'Selected B')
+    const untouched = await makeTask(second.id, 'Unselected')
+    const child = (await server.inject({ method: 'POST', url: `/api/tasks/${a.id}/subtasks`, payload: { title: 'Unselected child' } })).json()
+    await server.inject({ method: 'POST', url: `/api/tasks/${a.id}/comments`, payload: { content: 'Keep comment' } })
+    const status = (await server.inject({ method: 'POST', url: '/api/tasks/statuses', payload: { workspaceId: workspace.id, name: 'In Progress' } })).json()
+    const archived = await server.inject({ method: 'PATCH', url: `/api/tasks/${b.id}`, payload: { archived: true, statusId: status.id, position: 19 } })
+    assert.equal(archived.statusCode, 200)
+    assert.equal(archived.json().archived, true)
+    assert.equal(archived.json().statusId, status.id)
+    const snapshot = () => sqlite.prepare('SELECT * FROM tasks WHERE id IN (?, ?, ?, ?) ORDER BY id').all(a.id, b.id, untouched.id, child.id) as Array<Record<string, unknown>>
+    const before = snapshot()
+    const commentsBefore = sqlite.prepare('SELECT * FROM activity_log WHERE task_id = ?').all(a.id)
+    const tagsBefore = sqlite.prepare('SELECT * FROM task_tags WHERE task_id = ?').all(a.id)
+    const post = (payload: object) => server.inject({ method: 'POST', url: '/api/tasks/bulk-reschedule', payload })
+    for (const payload of [
+      {}, { taskIds: [] }, { taskIds: 'bad' }, { taskIds: [a.id, 1] }, { taskIds: [a.id, 'bad'], dueDate: '2032-02-29' },
+      { taskIds: Array(5001).fill(a.id), dueDate: '2032-02-29' },
+      ...[null, 123, {}, [], '', 'tomorrow', '2031-02-29', '2032-02-30', '2032-13-01', '2032-00-01', '2032-01-00', '2032-04-31', '2032-2-01', '2032-01-01T00:00:00Z', '0000-01-01', '10000-01-01'].map((dueDate) => ({ taskIds: [a.id], dueDate })),
+    ]) {
+      assert.equal((await post(payload)).statusCode, 400, JSON.stringify(payload))
+      assert.deepEqual(snapshot(), before)
+    }
+    const unknown = await post({ taskIds: [a.id, crypto.randomUUID()], dueDate: '2032-02-29' })
+    assert.equal(unknown.statusCode, 404)
+    assert.deepEqual(snapshot(), before)
+
+    // Prove database errors roll back even after another selected row was updated.
+    sqlite.exec(`CREATE TRIGGER reject_bulk_reschedule BEFORE UPDATE OF due_date ON tasks WHEN NEW.id = '${b.id}' BEGIN SELECT RAISE(ABORT, 'test rollback'); END`)
+    try {
+      assert.equal((await post({ taskIds: [a.id, b.id], dueDate: '2032-02-29' })).statusCode, 500)
+      assert.deepEqual(snapshot(), before)
+    } finally { sqlite.exec('DROP TRIGGER reject_bulk_reschedule') }
+
+    const result = await post({ taskIds: [a.id, b.id, a.id], dueDate: '2032-02-29' })
+    assert.equal(result.statusCode, 200)
+    assert.equal(result.json().rescheduledCount, 2)
+    const due = new Date(result.json().dueDate)
+    assert.equal(localDateKey(due), '2032-02-29')
+    assert.deepEqual([due.getHours(), due.getMinutes(), due.getSeconds()], [23, 59, 59])
+    for (const after of snapshot()) {
+      const original = before.find((row) => row.id === after.id)!
+      if (after.id === a.id || after.id === b.id) {
+        assert.equal(after.due_date, Math.floor(due.getTime() / 1000))
+        assert.deepEqual({ ...after, due_date: original.due_date, updated_at: original.updated_at }, original)
+      } else assert.deepEqual(after, original)
+    }
+    assert.deepEqual(sqlite.prepare('SELECT * FROM activity_log WHERE task_id = ?').all(a.id), commentsBefore)
+    assert.deepEqual(sqlite.prepare('SELECT * FROM task_tags WHERE task_id = ?').all(a.id), tagsBefore)
+    const pastDue = (await server.inject({ method: 'GET', url: `/api/tasks/project/${first.id}?filter=pastDue` })).json()
+    assert.equal(pastDue.some((row: { id: string }) => row.id === a.id), false)
+    const future = (await server.inject({ method: 'GET', url: `/api/tasks/${a.id}` })).json()
+    assert.equal(localDateKey(new Date(future.dueDate)), '2032-02-29')
+
+    await server.inject({ method: 'PATCH', url: `/api/tasks/${a.id}`, payload: { highlight: true } })
+    const today = await post({ taskIds: [a.id], dueDate: localDateKey(new Date()) })
+    assert.equal(today.json().clearedHighlightCount, 0)
+    assert.equal((await server.inject({ method: 'GET', url: `/api/tasks/${a.id}` })).json().highlight, true)
+    const tomorrowKey = localDateKey(addDays(new Date(), 1))
+    const tomorrow = await post({ taskIds: [a.id], dueDate: tomorrowKey })
+    assert.equal(tomorrow.json().clearedHighlightCount, 1)
+    const refreshed = (await server.inject({ method: 'GET', url: `/api/tasks/${a.id}` })).json()
+    assert.equal(refreshed.highlight, false)
+    assert.equal(localDateKey(new Date(refreshed.dueDate)), tomorrowKey)
+    const upcoming = (await server.inject({ method: 'GET', url: `/api/tasks/project/${first.id}?filter=dueTomorrow` })).json()
+    assert.equal(upcoming.some((row: { id: string }) => row.id === a.id), true)
+  } finally { await server.close() }
+})
+
 test('bulk delete removes selected tasks and their related records only', async () => {
   const server = await createServer()
   try {

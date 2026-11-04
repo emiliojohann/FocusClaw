@@ -773,6 +773,39 @@ export async function taskRoutes(fastify: FastifyInstance) {
     return reply.send(hydrated)
   })
 
+  // Change selected tasks only; never run completion, recurrence, or project-move logic.
+  fastify.post('/bulk-reschedule', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { taskIds, dueDate } = (request.body ?? {}) as { taskIds?: unknown; dueDate?: unknown }
+    if (!Array.isArray(taskIds) || taskIds.length === 0 || taskIds.length > 5000) {
+      return reply.status(400).send({ error: 'taskIds must contain 1-5000 task IDs' })
+    }
+    if (!taskIds.every((id) => typeof id === 'string' && isValidUUID(id))) {
+      return reply.status(400).send({ error: 'Every task ID must be a valid UUID' })
+    }
+    if (typeof dueDate !== 'string' || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(dueDate)) {
+      return reply.status(400).send({ error: 'dueDate must be a calendar date in YYYY-MM-DD format (1000-9999)' })
+    }
+    const parsed = parseDueDateInput(dueDate)
+    if (!Number.isFinite(parsed.getTime()) || localDateKey(parsed) !== dueDate) {
+      return reply.status(400).send({ error: 'dueDate must be an actual calendar date' })
+    }
+    const ids = [...new Set(taskIds)]
+    const placeholders = ids.map(() => '?').join(', ')
+    const offToday = dueDate !== localDateKey()
+    const reschedule = sqlite.transaction(() => {
+      const rows = sqlite.prepare(`SELECT id, highlight FROM tasks WHERE id IN (${placeholders})`)
+        .all(...ids) as Array<{ id: string; highlight: number }>
+      if (rows.length !== ids.length) return null
+      sqlite.prepare(`UPDATE tasks SET due_date = ?, updated_at = unixepoch(),
+        highlight = CASE WHEN ? THEN 0 ELSE highlight END WHERE id IN (${placeholders})`)
+        .run(Math.floor(parsed.getTime() / 1000), offToday ? 1 : 0, ...ids)
+      return { rescheduledCount: ids.length, clearedHighlightCount: offToday ? rows.filter((row) => row.highlight).length : 0 }
+    })
+    const result = reschedule()
+    if (!result) return reply.status(404).send({ error: 'One or more selected tasks no longer exist; no tasks were changed' })
+    return reply.send({ ...result, dueDate: new Date(Math.floor(parsed.getTime() / 1000) * 1000).toISOString() })
+  })
+
   // Delete multiple tasks in one transaction. Related task metadata cascades with each task.
   fastify.post('/bulk-delete', async (request: FastifyRequest, reply: FastifyReply) => {
     const { taskIds } = (request.body || {}) as { taskIds?: unknown }

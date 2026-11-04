@@ -86,6 +86,8 @@ OpenClaw and Hermes should find tasks by title/project before asking users for t
 
 Create projects, add tasks, set priority, choose due dates, assign owner labels, move work between To Do and In Progress, and mark work complete from the web app.
 
+Use **Select tasks → Reschedule** to apply Today, Tomorrow, seven days from today, or a custom calendar date to selected tasks, including across projects. Apply changes only due dates (and removes the Today highlight when scheduling off today); it does not move projects, complete/reopen tasks, or change recurrence settings or unselected subtasks. Cancel and failed requests retain the selection. The API is `POST /api/tasks/bulk-reschedule` with `{ "taskIds": ["<uuid>"], "dueDate": "YYYY-MM-DD" }`: 1–5000 IDs, deduplicated, real dates in years 1000–9999, saved at server-local end of day. Invalid input returns 400; unknown IDs return 404 with no changes. Success returns `rescheduledCount`, `clearedHighlightCount`, and the stored ISO `dueDate`.
+
 OpenClaw and Hermes can work with the same records through the local Agent Automation API. This keeps human task planning and agent execution context in one structured place.
 
 ### Universal Tags
@@ -217,7 +219,7 @@ Useful environment variables:
 ```bash
 PORT=3001
 API_HOST=127.0.0.1
-API_KEY=dev-api-key
+API_KEY=<YOUR_RANDOM_API_KEY>
 VITE_DEV_HOST=127.0.0.1
 VITE_DEV_PORT=5173
 VITE_API_PROXY_TARGET=http://127.0.0.1:3001
